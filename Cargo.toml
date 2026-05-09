@@ -15,7 +15,7 @@ edition = "2024"
 license = "MIT"
 rust-version = "1.95"
 authors = ["matchx authors"]
-repository = "https://github.com/REPLACE-ME/matchx"
+repository = "https://github.com/pauti04/matchx"
 description = "matchx — a high-performance Rust limit order book matching engine."
 
 [workspace.dependencies]
