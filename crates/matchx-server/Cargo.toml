@@ -1,0 +1,18 @@
+[package]
+name        = "matchx-server"
+version.workspace      = true
+edition.workspace      = true
+license.workspace      = true
+rust-version.workspace = true
+authors.workspace      = true
+repository.workspace   = true
+description = "matchx — TCP order entry and UDP multicast market data server."
+
+[[bin]]
+name = "matchx-server"
+path = "src/main.rs"
+
+[dependencies]
+
+[lints]
+workspace = true
