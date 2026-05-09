@@ -1,23 +1,16 @@
-//! Order side: buy or sell.
-
-/// The side of the book an order rests on or trades against.
-///
-/// Encoded as a one-byte enum to make wire and on-disk representations
-/// trivial — see [`docs/wire-protocol.md`](../../../../../docs/wire-protocol.md)
-/// for the byte mapping.
+/// Order side.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum Side {
-    /// A bid: willing to buy at or below a given price.
+    /// Bid: willing to buy at or below.
     Buy = 1,
-    /// An offer: willing to sell at or above a given price.
+    /// Offer: willing to sell at or above.
     Sell = 2,
 }
 
 impl Side {
-    /// Return the opposite side.
+    /// Opposite side.
     #[inline]
-    #[must_use]
     pub const fn opposite(self) -> Self {
         match self {
             Self::Buy => Self::Sell,
@@ -31,7 +24,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn opposite_is_involutive() {
+    fn opposite_involutive() {
         assert_eq!(Side::Buy.opposite().opposite(), Side::Buy);
         assert_eq!(Side::Sell.opposite().opposite(), Side::Sell);
     }

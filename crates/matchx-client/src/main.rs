@@ -1,7 +1,3 @@
-//! matchx test client and load generator.
-//!
-//! Bootstrap stub. Implementation lands once the wire protocol is defined.
+//! matchx test client.
 
-fn main() {
-    // Intentionally empty in the bootstrap slice.
-}
+fn main() {}
