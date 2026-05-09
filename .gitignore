@@ -1,0 +1,10 @@
+/target
+**/*.rs.bk
+*.swp
+*.swo
+.DS_Store
+.idea/
+.vscode/
+*.iml
+# Cargo.lock IS committed: this workspace produces binaries (server, client,
+# replay), and reproducible builds for those require a locked dependency set.
