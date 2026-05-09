@@ -1,4 +1,11 @@
-//! Core domain types.
+//! Core domain types: identifiers, side, price, quantity, sequence numbers,
+//! and timestamps.
+//!
+//! All numeric types are integers — there are no floats anywhere in this
+//! module by deliberate design. Binary floating-point cannot exactly
+//! represent decimal prices and accumulated rounding violates the byte-
+//! exact replay guarantee. See
+//! [`docs/correctness-guarantees.md`](../../../../docs/correctness-guarantees.md).
 
 mod order_id;
 mod price;

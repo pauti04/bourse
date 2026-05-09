@@ -1,15 +1,18 @@
 [package]
-name = "matchx-client"
+name        = "matchx-client"
 version.workspace      = true
 edition.workspace      = true
 license.workspace      = true
 rust-version.workspace = true
+authors.workspace      = true
 repository.workspace   = true
-description = "matchx test client."
+description = "matchx — test client and load generator."
 
 [[bin]]
 name = "matchx-client"
 path = "src/main.rs"
+
+[dependencies]
 
 [lints]
 workspace = true

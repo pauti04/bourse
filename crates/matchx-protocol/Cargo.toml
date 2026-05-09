@@ -1,11 +1,14 @@
 [package]
-name = "matchx-protocol"
+name        = "matchx-protocol"
 version.workspace      = true
 edition.workspace      = true
 license.workspace      = true
 rust-version.workspace = true
+authors.workspace      = true
 repository.workspace   = true
-description = "matchx wire protocol — binary codec, no I/O."
+description = "matchx — FIX-inspired binary wire protocol codec (no I/O)."
+
+[dependencies]
 
 [lints]
 workspace = true
