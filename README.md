@@ -110,6 +110,12 @@ cargo run --release -p matchx-client -- 127.0.0.1:9000 5000 50000
 - [Development log](docs/log.md)
 - [v2 ideas (out of scope)](docs/v2-ideas.md)
 
+### Write-ups
+
+- [Designing the matchx lock-free SPSC queue](docs/posts/lock-free-spsc.md) —
+  cache padding, cached views, Acquire/Release ordering, and validating
+  the whole thing with Miri in CI.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
