@@ -48,7 +48,8 @@ not the matcher. A kernel-bypass NIC would shave most of it.
 | Hand-rolled binary wire protocol codec | ✅ slice 6 |
 | TCP server + tokio-based gateway (`matchx-server`) | ✅ slice 7 |
 | Load-gen client with RTT + throughput histogram (`matchx-client`) | ✅ slice 8 |
-| Snapshots + recovery time bench | planned |
+| Lock-free SPSC write-up | ✅ slice 9 |
+| Snapshots + byte-exact recovery test | ✅ slice 10 |
 | Multi-tenant matching (MPSC at the gateway) | v2 |
 
 ## Architecture

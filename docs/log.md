@@ -127,7 +127,36 @@ The TCP cost (~45 µs RTT) is dominated by the kernel network stack;
 the in-process matcher's pipeline is ~225 ns. Closing the gap needs
 kernel-bypass NIC paths — parked under v2.
 
-## slice 9 — next (probably)
-Pick one of: snapshots + recovery time bench (durability story);
-write-up / blog post on the lock-free SPSC design; market-data UDP
-multicast feed. Resume-impact ranking: blog post > snapshots > MD feed.
+## slice 9
+Write-up: [`docs/posts/lock-free-spsc.md`](posts/lock-free-spsc.md).
+~1500 words walking through the SPSC queue design — cache padding,
+cached views, Acquire/Release reasoning, the `!Sync` trick, Miri
+validation in CI, numbers.
+
+## slice 10
+Snapshots. Atomic temp-then-rename writer, versioned file format
+(magic + version + seq marker + n + per-order records). On recovery,
+`Matcher::with_book(book, marker_seq)` seeds the engine with the
+snapshot's book and a `SequenceGenerator::starting_at` so resting
+orders added during WAL-tail replay end up with the same seq values
+they had on the live engine — hence byte-exact recovery, not just
+"semantically equivalent."
+
+Headline integration test (`tests/snapshot_recovery.rs`): run 5k random
+commands through a live matcher with WAL fsync per command, snapshot,
+run another 5k, recover from `(snapshot, WAL_tail)`. Asserts the
+recovered book equals the live book, and the tail's WAL skip count
+matches the snapshot marker.
+
+WAL records aren't seq-tagged in v1 — we skip-by-count. Tagging is on
+the v2 list and would let recovery skip-by-seq directly.
+
+5 snapshot unit tests + 1 integration test. 62 tests total in
+matchx-core.
+
+## slice 11 — maybe
+Multi-tenant matching (MPSC at the gateway) so the server can take
+more than one connection per matcher. Or the market-data UDP
+multicast feed. Or scale the headline numbers — bigger benchmarks,
+more workloads, prettier output. Resume-impact-wise, more numbers >
+more features at this point.

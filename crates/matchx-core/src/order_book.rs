@@ -111,6 +111,51 @@ impl Book {
         self.index.contains_key(&id)
     }
 
+    /// Iterate every resting order. Yields bids first (price-ascending,
+    /// time-priority within a level), then asks (same), so reinsertion in
+    /// the same order reconstructs the level structure exactly.
+    pub fn iter_resting(&self) -> impl Iterator<Item = RestingOrder> + '_ {
+        let bids = self.bids.iter().flat_map(|(price, level)| {
+            let p = *price;
+            level.iter().map(move |o| RestingOrder {
+                id: o.id,
+                side: Side::Buy,
+                price: p,
+                qty: o.qty,
+                seq: o.seq,
+            })
+        });
+        let asks = self.asks.iter().flat_map(|(price, level)| {
+            let p = *price;
+            level.iter().map(move |o| RestingOrder {
+                id: o.id,
+                side: Side::Sell,
+                price: p,
+                qty: o.qty,
+                seq: o.seq,
+            })
+        });
+        bids.chain(asks)
+    }
+}
+
+/// One resting order's worth of state — enough to round-trip through a
+/// snapshot file and back into a `Book` via [`Book::add`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RestingOrder {
+    /// Order id.
+    pub id: OrderId,
+    /// Side.
+    pub side: Side,
+    /// Price.
+    pub price: Price,
+    /// Resting quantity.
+    pub qty: Qty,
+    /// Time-priority sequence.
+    pub seq: Sequence,
+}
+
+impl Book {
     /// Take up to `want` quantity from the front of the `(side, price)`
     /// level. Returns `None` if no order rests there or `want` is zero.
     /// The maker order is reduced in place; if exhausted it is removed
