@@ -154,9 +154,39 @@ the v2 list and would let recovery skip-by-seq directly.
 5 snapshot unit tests + 1 integration test. 62 tests total in
 matchx-core.
 
-## slice 11 — maybe
-Multi-tenant matching (MPSC at the gateway) so the server can take
-more than one connection per matcher. Or the market-data UDP
-multicast feed. Or scale the headline numbers — bigger benchmarks,
-more workloads, prettier output. Resume-impact-wise, more numbers >
-more features at this point.
+## slice 11
+Second write-up — WAL + byte-exact replay design. Same shape as the
+SPSC post: tied to working code, deliberately publish-quality.
+
+## slice 12
+Allocation-counting test harness. A custom global allocator wraps
+`System` and counts every `alloc` / `alloc_zeroed` / `realloc` call.
+Tests warm the matcher into steady state, snapshot the counter,
+loop, assert delta < threshold.
+
+The headline numbers (release build, after warmup):
+
+```
+steady-state cross  1000 pairs → 0 allocs
+steady-state market 1000 pairs → 1 alloc
+zero-qty reject     1000 calls → 9 allocs (allocator/test bookkeeping)
+```
+
+So "no allocation on the matcher hot path" is now machine-verified
+on every CI run, not just argued.
+
+Documentation tests for the bounded cases (~3 allocs per cycle on
+destroy-and-recreate-level, ~3 per fresh-level insert) pin the v1
+budget so a regression that adds per-call allocations on those paths
+trips the test too. Closing those gaps requires intrusive linked
+lists in an arena + a flat tick array — v2 work.
+
+Catches: charter literally said this should exist (`allocation-
+counting harness`); we'd argued for "no alloc on hot path" without
+proving it. Now we prove it.
+
+## slice 13 — next
+Tag every WAL record with its matcher seq. Recovery can then
+skip-by-seq using the snapshot marker directly, instead of the
+out-of-band record-count we use today. One-byte-per-record cost,
+WAL format bump.
