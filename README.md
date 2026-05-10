@@ -146,6 +146,9 @@ For a 5-minute interviewer skim:
 
 - [Designing the matchx lock-free SPSC queue](docs/posts/lock-free-spsc.md)
 - [Crash-safe matching: WAL and byte-exact replay](docs/posts/wal-and-byte-exact-replay.md)
+- [matchx numbers, and how they were measured](docs/posts/numbers-and-methodology.md) —
+  what each headline number actually measures, what the bench code is,
+  and what we don't claim.
 
 ### CI
 
