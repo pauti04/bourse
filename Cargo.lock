@@ -429,6 +429,9 @@ dependencies = [
 [[package]]
 name = "matchx-replay"
 version = "0.0.1"
+dependencies = [
+ "matchx-core",
+]
 
 [[package]]
 name = "matchx-server"

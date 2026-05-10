@@ -5,11 +5,14 @@ edition.workspace      = true
 license.workspace      = true
 rust-version.workspace = true
 repository.workspace   = true
-description = "matchx replay tool."
+description = "matchx replay tool: rebuild book state from a snapshot + WAL tail."
 
 [[bin]]
 name = "matchx-replay"
 path = "src/main.rs"
+
+[dependencies]
+matchx-core = { path = "../matchx-core" }
 
 [lints]
 workspace = true
