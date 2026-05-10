@@ -104,6 +104,17 @@ cargo run --release -p matchx-server -- 127.0.0.1:9000
 cargo run --release -p matchx-client -- 127.0.0.1:9000 5000 50000
 ```
 
+To rebuild book state from a WAL (with optional snapshot) and print
+a state hash:
+
+```bash
+# full WAL replay
+cargo run --release -p matchx-replay -- --wal path/to/wal
+
+# snapshot + WAL tail (skips records with wal_seq <= snapshot marker)
+cargo run --release -p matchx-replay -- --snapshot path/to/snap --wal path/to/wal
+```
+
 ## Documentation
 
 - [Architecture](docs/architecture.md)
