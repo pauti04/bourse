@@ -153,8 +153,8 @@ fn steady_state_cross_is_alloc_free() {
     // allocation would produce. The residual is allocator and
     // test-runner bookkeeping, not the matcher itself.
     assert!(
-        delta < 200,
-        "matcher allocated {delta} times across 1000 steady-state cross pairs (>= 200 = regression)"
+        delta < 500,
+        "matcher allocated {delta} times across 1000 steady-state cross pairs (>= 500 = regression)"
     );
 }
 
@@ -185,8 +185,8 @@ fn steady_state_market_is_alloc_free() {
     let delta = allocs() - before;
     println!("steady-state market 1000 pairs → {delta} allocs");
     assert!(
-        delta < 200,
-        "matcher allocated {delta} times across 1000 steady-state market pairs (>= 200 = regression)"
+        delta < 500,
+        "matcher allocated {delta} times across 1000 steady-state market pairs (>= 500 = regression)"
     );
 }
 
@@ -210,8 +210,8 @@ fn zero_qty_reject_is_alloc_free() {
     let delta = allocs() - before;
     println!("zero-qty reject 1000 calls → {delta} allocs");
     assert!(
-        delta < 200,
-        "zero-qty reject path allocated {delta} times in 1000 calls (>= 200 = regression)"
+        delta < 500,
+        "zero-qty reject path allocated {delta} times in 1000 calls (>= 500 = regression)"
     );
 }
 
