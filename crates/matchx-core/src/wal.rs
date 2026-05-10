@@ -8,6 +8,23 @@
 //! Replay re-feeds the recorded inputs through a fresh `Matcher` and
 //! produces the same book and the same event stream — bit for bit.
 //! `tests/replay.rs` exercises this on 10k random orders.
+//!
+//! ## Commit cadence
+//!
+//! `append` only buffers; durability happens on `commit`, which flushes
+//! and fsyncs. Two patterns:
+//!
+//! - **fsync-per-record** (`append` → `commit` on every input). The
+//!   simplest model: a client ack waits for the record's fsync, so
+//!   throughput is bounded by the disk's fsync latency. The replay
+//!   integration test uses this cadence.
+//! - **group commit** (drain `N` records off the input queue, append
+//!   all `N`, `commit` once). The whole batch becomes durable together;
+//!   the engine acks all `N` after the single fsync. Throughput jumps
+//!   roughly with the batch size because fsync amortises across the
+//!   group, while the *last* record in the batch sees roughly the same
+//!   latency as fsync-per-record. `benches/wal_commit.rs` measures the
+//!   ratio.
 
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufReader, BufWriter, Read, Write};
