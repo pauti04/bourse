@@ -409,6 +409,10 @@ dependencies = [
 [[package]]
 name = "matchx-protocol"
 version = "0.0.1"
+dependencies = [
+ "matchx-core",
+ "proptest",
+]
 
 [[package]]
 name = "matchx-replay"

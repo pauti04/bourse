@@ -7,5 +7,11 @@ rust-version.workspace = true
 repository.workspace   = true
 description = "matchx wire protocol — binary codec, no I/O."
 
+[dependencies]
+matchx-core = { path = "../matchx-core" }
+
+[dev-dependencies]
+proptest.workspace = true
+
 [lints]
 workspace = true
