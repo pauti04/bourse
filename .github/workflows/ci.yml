@@ -50,3 +50,13 @@ jobs:
         run: rustup show
       - uses: Swatinem/rust-cache@v2
       - run: cargo doc --workspace --no-deps
+
+  bench-compile:
+    name: cargo bench --no-run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned toolchain (from rust-toolchain.toml)
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo bench --workspace --no-run
