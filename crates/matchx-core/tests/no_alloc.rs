@@ -46,12 +46,20 @@
 )]
 
 use std::alloc::{GlobalAlloc, Layout, System};
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use matchx_core::matcher::{Event, Matcher, NewOrder, OrderKind};
 use matchx_core::types::{OrderId, Price, Qty, Side, Timestamp};
 
 static ALLOC_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+/// Cargo runs tests in this binary in parallel by default. Since
+/// `ALLOC_COUNT` is a single global counter, two tests measuring
+/// concurrently would each see the *other* test's allocations leak
+/// into their delta. Each test takes this lock for the duration of
+/// its measurement window so the deltas are clean.
+static TEST_LOCK: Mutex<()> = Mutex::new(());
 
 struct Counting;
 
@@ -124,6 +132,7 @@ fn warmed_book_at_depth(depth: u64) -> (Matcher, Vec<Event>) {
 /// one entry in and out without rehashing. Expectation: zero allocs.
 #[test]
 fn steady_state_cross_is_alloc_free() {
+    let _g = TEST_LOCK.lock().expect("test lock");
     let (mut m, mut events) = warmed_book_at_depth(1024);
     let mut next_id = 1_000_000u64;
 
@@ -161,6 +170,7 @@ fn steady_state_cross_is_alloc_free() {
 /// Same shape with a Market on the consume side.
 #[test]
 fn steady_state_market_is_alloc_free() {
+    let _g = TEST_LOCK.lock().expect("test lock");
     let (mut m, mut events) = warmed_book_at_depth(1024);
     let mut next_id = 2_000_000u64;
 
@@ -194,6 +204,7 @@ fn steady_state_market_is_alloc_free() {
 /// and should be alloc-free.
 #[test]
 fn zero_qty_reject_is_alloc_free() {
+    let _g = TEST_LOCK.lock().expect("test lock");
     let mut m = Matcher::new();
     let mut events = Vec::with_capacity(8);
 
@@ -222,6 +233,7 @@ fn zero_qty_reject_is_alloc_free() {
 /// V2's intrusive-list-in-arena book closes this gap entirely.
 #[test]
 fn destroy_recreate_level_budget() {
+    let _g = TEST_LOCK.lock().expect("test lock");
     let mut m = Matcher::new();
     let mut events = Vec::with_capacity(8);
     let mut next_id = 1u64;
@@ -261,6 +273,7 @@ fn destroy_recreate_level_budget() {
 /// that pushes it higher trips the test.
 #[test]
 fn fresh_levels_budget() {
+    let _g = TEST_LOCK.lock().expect("test lock");
     let mut m = Matcher::new();
     let mut events = Vec::with_capacity(8);
 
