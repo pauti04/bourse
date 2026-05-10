@@ -121,6 +121,15 @@ cargo run --release -p matchx-client -- 127.0.0.1:9000 5000 50000
   10k-order integration test that proves recovery is bit-equal to the
   live engine.
 
+### CI bench numbers
+
+The `bench numbers` CI job runs the criterion benches on
+`ubuntu-latest` and uploads `bench_numbers.md` as a downloadable
+artifact on every PR. GitHub runners are noisy (2-10× variance run
+to run) so absolute numbers are a sanity check; the relative
+comparisons (group commit vs fsync-per-record, depth-N vs depth-1)
+are stable.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
