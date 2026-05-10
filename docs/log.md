@@ -97,7 +97,37 @@ verify the server's `ServerMessage` stream matches what the matcher
 should emit. Two tests — full cross of two opposite limits, market
 on empty book.
 
-## slice 8 — next
-Load-gen client (`matchx-client`) that drives sustained flow over
-TCP and reports p50/p99/p99.9 latency histograms. That gives us the
-end-to-end-over-network number for the README.
+## slice 8
+Load-gen client. Two modes in one binary:
+
+- **RTT (sequential)** — for each iter: rest a Sell, time send-Buy →
+  `Done(Filled)`. No pipelining, so the latency reflects one-order
+  end-to-end with no queueing.
+- **Throughput (pipelined burst)** — encode all `n` orders into one
+  buffer, write once, drain all responses; report wall-clock rate.
+
+Both connect over TCP with `TCP_NODELAY` on. 100-iter warmup before
+the RTT measurement so caches are hot.
+
+Numbers on M-series, macOS, release, single connection, single matcher:
+
+```
+RTT (sequential):
+  p50   ~45 µs
+  p90   ~64 µs
+  p99   ~109 µs
+  p99.9 ~150 µs
+
+throughput (50k pipelined burst):
+  ~118k orders/sec
+  ~59k round-trips/sec
+```
+
+The TCP cost (~45 µs RTT) is dominated by the kernel network stack;
+the in-process matcher's pipeline is ~225 ns. Closing the gap needs
+kernel-bypass NIC paths — parked under v2.
+
+## slice 9 — next (probably)
+Pick one of: snapshots + recovery time bench (durability story);
+write-up / blog post on the lock-free SPSC design; market-data UDP
+multicast feed. Resume-impact ranking: blog post > snapshots > MD feed.
