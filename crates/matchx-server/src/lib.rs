@@ -51,22 +51,32 @@ pub async fn bind(addr: &str) -> io::Result<TcpListener> {
 /// across every accepted connection.
 pub async fn serve(listener: TcpListener, cfg: Config) -> io::Result<()> {
     let hub = Arc::new(Hub::start(cfg.inbox_capacity));
+    tracing::info!(
+        inbox_capacity = cfg.inbox_capacity,
+        "hub started, accepting connections"
+    );
     loop {
-        let (stream, _peer) = listener.accept().await?;
+        let (stream, peer) = listener.accept().await?;
         let hub = Arc::clone(&hub);
-        tokio::spawn(handle_connection(stream, hub));
+        tokio::spawn(handle_connection(stream, hub, peer));
     }
 }
 
-async fn handle_connection(stream: TcpStream, hub: Arc<Hub>) {
+async fn handle_connection(stream: TcpStream, hub: Arc<Hub>, peer: std::net::SocketAddr) {
     let _ = stream.set_nodelay(true);
     let (submitter, events) = hub.register();
+    let conn_id = submitter.conn_id();
+    tracing::info!(%peer, conn_id, "connection accepted");
     let (read_half, write_half) = stream.into_split();
 
     let reader = tokio::spawn(reader_loop(read_half, submitter));
     let writer = tokio::spawn(writer_loop(write_half, events));
 
-    let _ = reader.await;
+    match reader.await {
+        Ok(Ok(())) => tracing::info!(conn_id, %peer, "client disconnected (clean EOF)"),
+        Ok(Err(e)) => tracing::warn!(conn_id, %peer, error = %e, "reader error"),
+        Err(e) => tracing::warn!(conn_id, %peer, error = %e, "reader task panicked"),
+    }
     writer.abort();
     let _ = writer.await;
 }

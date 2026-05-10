@@ -12,7 +12,9 @@ name = "matchx-replay"
 path = "src/main.rs"
 
 [dependencies]
-matchx-core = { path = "../matchx-core" }
+matchx-core                  = { path = "../matchx-core" }
+tracing.workspace            = true
+tracing-subscriber.workspace = true
 
 [lints]
 workspace = true
