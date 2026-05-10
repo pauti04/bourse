@@ -21,7 +21,7 @@ proptest           = "1"
 criterion          = "0.7"
 crc32c             = "0.6"
 crossbeam-queue    = "0.3"
-tokio              = { version = "1", features = ["rt-multi-thread", "net", "io-util", "macros", "sync", "signal"] }
+tokio              = { version = "1", features = ["rt-multi-thread", "net", "io-util", "macros", "sync", "signal", "time"] }
 tracing            = { version = "0.1", default-features = false, features = ["std", "attributes"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter"] }
 

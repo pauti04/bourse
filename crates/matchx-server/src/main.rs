@@ -3,8 +3,17 @@
 //!
 //! Logging is `tracing` + `tracing-subscriber` formatter. Set log level
 //! via `RUST_LOG` (e.g. `RUST_LOG=info,matchx_server=debug`).
+//!
+//! Stops cleanly on SIGINT (Ctrl-C) or SIGTERM: stops accepting new
+//! connections, drains in-flight ones up to `Config::shutdown_grace`,
+//! then exits.
 
-use matchx_server::{Config, bind, serve};
+#![allow(
+    clippy::expect_used,
+    reason = "signal handler install is unrecoverable; matches std::thread"
+)]
+
+use matchx_server::{Config, bind, serve_until};
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -22,5 +31,22 @@ async fn main() -> std::io::Result<()> {
 
     let listener = bind(&addr).await?;
     tracing::info!(%addr, "matchx-server listening");
-    serve(listener, Config::default()).await
+    serve_until(listener, Config::default(), shutdown_signal()).await
+}
+
+#[cfg(unix)]
+async fn shutdown_signal() {
+    use tokio::signal::unix::{SignalKind, signal};
+    let mut sigterm = signal(SignalKind::terminate()).expect("install SIGTERM handler");
+    let mut sigint = signal(SignalKind::interrupt()).expect("install SIGINT handler");
+    tokio::select! {
+        _ = sigterm.recv() => tracing::info!("received SIGTERM"),
+        _ = sigint.recv()  => tracing::info!("received SIGINT (Ctrl-C)"),
+    }
+}
+
+#[cfg(not(unix))]
+async fn shutdown_signal() {
+    let _ = tokio::signal::ctrl_c().await;
+    tracing::info!("received Ctrl-C");
 }
