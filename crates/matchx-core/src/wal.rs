@@ -26,9 +26,9 @@
 //!   latency as fsync-per-record. `benches/wal_commit.rs` measures the
 //!   ratio.
 
-use std::fs::{File, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, BufWriter, Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::matcher::{NewOrder, OrderKind};
 use crate::types::{OrderId, Price, Qty, Sequence, Side, Timestamp};
@@ -130,42 +130,96 @@ pub enum WalRecord {
 /// `append` queues bytes through a `BufWriter`; `commit` flushes and
 /// fsyncs. Call `commit` whenever you need durability — typically per
 /// acked op.
+///
+/// Two opening modes:
+///
+/// - [`WalWriter::create`] — single-file segment at the given path. The
+///   file grows unboundedly. Useful for tests and short-lived writers.
+/// - [`WalWriter::open_dir`] — manages a directory of rotating segment
+///   files (`seg-NNNNNNNN.wal`). When an `append` would push the
+///   current segment past `max_segment_bytes`, the writer commits and
+///   opens the next segment. `wal_seq` keeps incrementing across
+///   rotations.
 #[derive(Debug)]
 pub struct WalWriter {
     file: BufWriter<File>,
     next_seq: u64,
+    bytes_written: u64,
+    rotation: Option<RotationState>,
 }
+
+#[derive(Debug)]
+struct RotationState {
+    dir: PathBuf,
+    next_index: u64,
+    max_segment_bytes: u64,
+}
+
+/// Per-record framing overhead: 4-byte length + 4-byte CRC.
+const FRAME_OVERHEAD: u64 = 8;
 
 impl WalWriter {
     /// Create a new segment at `path`. Fails if the file already
     /// exists. Writes the segment header and fsyncs it before
     /// returning. The first appended record gets `wal_seq = 1`.
     pub fn create(path: &Path) -> Result<Self, WalError> {
-        let file = OpenOptions::new().write(true).create_new(true).open(path)?;
-        let mut w = BufWriter::new(file);
-        w.write_all(&MAGIC.to_le_bytes())?;
-        w.write_all(&[SEGMENT_VERSION, 0, 0, 0])?;
-        w.flush()?;
-        w.get_ref().sync_all()?;
+        let (file, header_bytes) = create_segment(path)?;
         Ok(Self {
-            file: w,
+            file,
             next_seq: 1,
+            bytes_written: header_bytes,
+            rotation: None,
+        })
+    }
+
+    /// Open a rotating-segment WAL writer in `dir`. Creates `dir` if
+    /// missing. Segments are named `seg-NNNNNNNN.wal`; on each call
+    /// to [`append`](Self::append) that would push the current segment
+    /// past `max_segment_bytes`, the writer commits the current
+    /// segment and opens the next one. `wal_seq` keeps incrementing
+    /// across rotations.
+    pub fn open_dir(dir: &Path, max_segment_bytes: u64) -> Result<Self, WalError> {
+        fs::create_dir_all(dir)?;
+        let next_index = next_segment_index(dir)?;
+        let path = segment_path(dir, next_index);
+        let (file, header_bytes) = create_segment(&path)?;
+        Ok(Self {
+            file,
+            next_seq: 1,
+            bytes_written: header_bytes,
+            rotation: Some(RotationState {
+                dir: dir.to_path_buf(),
+                next_index: next_index + 1,
+                max_segment_bytes: max_segment_bytes.max(64),
+            }),
         })
     }
 
     /// Append a record. Bytes go into the OS page cache; not durable
     /// until [`commit`](Self::commit). Returns the `wal_seq` assigned
-    /// to this record.
+    /// to this record. In rotating mode, may transparently roll to a
+    /// new segment file if this record would push the current one
+    /// past `max_segment_bytes`.
     pub fn append(&mut self, record: &WalRecord) -> Result<Sequence, WalError> {
         let seq = self.next_seq;
         let mut payload = Vec::with_capacity(56);
         payload.extend_from_slice(&seq.to_le_bytes());
         encode_record(record, &mut payload);
         let len = u32::try_from(payload.len()).map_err(|_| WalError::RecordTooLarge)?;
+        let record_bytes = FRAME_OVERHEAD + payload.len() as u64;
+
+        if let Some(rot) = &self.rotation
+            && self.bytes_written > 8
+            && self.bytes_written + record_bytes > rot.max_segment_bytes
+        {
+            self.rotate()?;
+        }
+
         let crc = crc32c::crc32c(&payload);
         self.file.write_all(&len.to_le_bytes())?;
         self.file.write_all(&crc.to_le_bytes())?;
         self.file.write_all(&payload)?;
+        self.bytes_written += record_bytes;
         self.next_seq += 1;
         Ok(Sequence::from_raw(seq))
     }
@@ -183,6 +237,67 @@ impl WalWriter {
     pub fn next_seq(&self) -> Sequence {
         Sequence::from_raw(self.next_seq)
     }
+
+    fn rotate(&mut self) -> Result<(), WalError> {
+        self.commit()?;
+        let Some(rot) = self.rotation.as_mut() else {
+            // Caller is supposed to check rotation.is_some() first; in
+            // non-rotating mode we just no-op rather than panic.
+            return Ok(());
+        };
+        let path = segment_path(&rot.dir, rot.next_index);
+        rot.next_index += 1;
+        let (file, header_bytes) = create_segment(&path)?;
+        self.file = file;
+        self.bytes_written = header_bytes;
+        Ok(())
+    }
+}
+
+fn create_segment(path: &Path) -> Result<(BufWriter<File>, u64), WalError> {
+    let file = OpenOptions::new().write(true).create_new(true).open(path)?;
+    let mut w = BufWriter::new(file);
+    w.write_all(&MAGIC.to_le_bytes())?;
+    w.write_all(&[SEGMENT_VERSION, 0, 0, 0])?;
+    w.flush()?;
+    w.get_ref().sync_all()?;
+    Ok((w, 8))
+}
+
+fn segment_path(dir: &Path, index: u64) -> PathBuf {
+    dir.join(format!("seg-{index:08}.wal"))
+}
+
+fn next_segment_index(dir: &Path) -> Result<u64, WalError> {
+    let mut max_seen: Option<u64> = None;
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let Some(s) = name.to_str() else { continue };
+        if let Some(idx_str) = s.strip_prefix("seg-").and_then(|s| s.strip_suffix(".wal"))
+            && let Ok(idx) = idx_str.parse::<u64>()
+        {
+            max_seen = Some(max_seen.map_or(idx, |m| m.max(idx)));
+        }
+    }
+    Ok(max_seen.map_or(0, |m| m + 1))
+}
+
+/// List the segment files in `dir` sorted by index.
+fn segments_in(dir: &Path) -> Result<Vec<PathBuf>, WalError> {
+    let mut out: Vec<(u64, PathBuf)> = Vec::new();
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let Some(s) = name.to_str() else { continue };
+        if let Some(idx_str) = s.strip_prefix("seg-").and_then(|s| s.strip_suffix(".wal"))
+            && let Ok(idx) = idx_str.parse::<u64>()
+        {
+            out.push((idx, entry.path()));
+        }
+    }
+    out.sort_by_key(|(idx, _)| *idx);
+    Ok(out.into_iter().map(|(_, p)| p).collect())
 }
 
 /// Reads records back from a WAL segment.
@@ -243,7 +358,8 @@ impl WalReader {
     }
 }
 
-/// Run `f` on every `(wal_seq, record)` in the WAL at `path`.
+/// Run `f` on every `(wal_seq, record)` in the WAL at `path` (single
+/// segment file).
 pub fn for_each_record<F>(path: &Path, mut f: F) -> Result<(), WalError>
 where
     F: FnMut(Sequence, WalRecord),
@@ -251,6 +367,21 @@ where
     let mut r = WalReader::open(path)?;
     while let Some((seq, rec)) = r.read_record()? {
         f(seq, rec);
+    }
+    Ok(())
+}
+
+/// Run `f` on every `(wal_seq, record)` across all segment files in
+/// `dir`, in segment-index order. Use with [`WalWriter::open_dir`].
+pub fn for_each_record_dir<F>(dir: &Path, mut f: F) -> Result<(), WalError>
+where
+    F: FnMut(Sequence, WalRecord),
+{
+    for path in segments_in(dir)? {
+        let mut r = WalReader::open(&path)?;
+        while let Some((seq, rec)) = r.read_record()? {
+            f(seq, rec);
+        }
     }
     Ok(())
 }
@@ -506,6 +637,68 @@ mod tests {
         );
         // Second record's body is short → treat as clean EOF.
         assert_eq!(r.read_record().unwrap(), None);
+    }
+
+    #[test]
+    fn rotating_writer_creates_multiple_segments_and_reads_back_in_order() {
+        let dir = temp_dir("rotating_writer");
+        // Tiny limit (96 bytes) so a couple of cancel records (each ~26
+        // bytes on disk including framing) trip rotation quickly.
+        let mut w = WalWriter::open_dir(&dir, 96).unwrap();
+        for i in 1..=10u64 {
+            let s = w.append(&WalRecord::Cancel(OrderId::new(i))).unwrap();
+            assert_eq!(s, Sequence::from_raw(i));
+        }
+        w.commit().unwrap();
+        drop(w);
+
+        // Multiple segment files should exist now.
+        let segs = segments_in(&dir).unwrap();
+        assert!(
+            segs.len() >= 2,
+            "expected ≥2 segments, got {} ({:?})",
+            segs.len(),
+            segs
+        );
+
+        // Reading via for_each_record_dir yields all 10 records in seq order.
+        let mut seen: Vec<u64> = Vec::new();
+        for_each_record_dir(&dir, |seq, rec| {
+            assert!(matches!(rec, WalRecord::Cancel(_)));
+            seen.push(seq.get());
+        })
+        .unwrap();
+        assert_eq!(seen, (1..=10).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn rotating_writer_resumes_after_existing_segments() {
+        let dir = temp_dir("rotating_writer_resumes");
+        {
+            let mut w = WalWriter::open_dir(&dir, 64).unwrap();
+            for i in 1..=5u64 {
+                w.append(&WalRecord::Cancel(OrderId::new(i))).unwrap();
+            }
+            w.commit().unwrap();
+        }
+        // Re-open the same dir; the next segment index should pick up
+        // after the existing ones.
+        {
+            let mut w = WalWriter::open_dir(&dir, 64).unwrap();
+            for i in 6..=10u64 {
+                w.append(&WalRecord::Cancel(OrderId::new(i))).unwrap();
+            }
+            w.commit().unwrap();
+        }
+        let mut seen_ids: Vec<u64> = Vec::new();
+        for_each_record_dir(&dir, |_seq, rec| {
+            if let WalRecord::Cancel(id) = rec {
+                seen_ids.push(id.get());
+            }
+        })
+        .unwrap();
+        seen_ids.sort_unstable();
+        assert_eq!(seen_ids, (1..=10).collect::<Vec<_>>());
     }
 
     #[test]
