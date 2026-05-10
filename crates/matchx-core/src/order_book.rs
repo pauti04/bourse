@@ -20,7 +20,7 @@ struct Order {
 type Level = VecDeque<Order>;
 
 /// Limit order book. Single-writer, not thread-safe.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct Book {
     bids: BTreeMap<Price, Level>,
     asks: BTreeMap<Price, Level>,
