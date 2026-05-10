@@ -185,8 +185,36 @@ Catches: charter literally said this should exist (`allocation-
 counting harness`); we'd argued for "no alloc on hot path" without
 proving it. Now we prove it.
 
-## slice 13 — next
-Tag every WAL record with its matcher seq. Recovery can then
-skip-by-seq using the snapshot marker directly, instead of the
-out-of-band record-count we use today. One-byte-per-record cost,
-WAL format bump.
+## slice 13
+WAL format bumped to v2 — every record's payload is prefixed with an
+8-byte `wal_seq` (internal monotonic counter, distinct from matcher
+seq). Snapshot format bumped to v2 as well: stores both
+`matcher_seq` (seeds the recovered SequenceGenerator) and `wal_seq`
+(last record durably included). Recovery is now self-contained: the
+snapshot file carries everything needed to skip the WAL prefix and
+seed the matcher. Removes the v1 limitation called out in slice 10.
+
+## slice 14
+WAL group commit benchmark — `benches/wal_commit.rs` compares fsync-
+per-record (the simplest model) vs one-fsync-per-batch:
+
+```
+fsync per record (1 / 8 / 64 / 256 records):
+  ~3.4 / ~25.9 / ~203.7 / ~951.0 ms
+group commit:
+  ~3.5 / ~3.8  / ~3.6   / ~3.9   ms
+```
+
+At batch=256 group commit is **245× faster** wall-time, because the
+single fsync amortises across the whole group. The WAL API already
+supported this (`append` only buffers; `commit` flushes + fsyncs);
+the slice documents the pattern in the module docs and pins numbers
+in CI via `cargo bench --no-run`.
+
+## slice 15 — maybe
+Linux benchmark numbers in CI as a downloadable artifact, so the
+repo's README can quote real production-relevant numbers (Linux,
+glibc malloc, ext4) instead of just the M-series macOS numbers. Or
+keep going with multi-tenant matching / kernel-bypass. Both are real
+wins; multi-tenant is the v1→v2 boundary, MD UDP feed is the
+publisher path missing from the current architecture.
