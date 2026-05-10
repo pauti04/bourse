@@ -1,0 +1,11 @@
+[package]
+name = "matchx-protocol"
+version.workspace      = true
+edition.workspace      = true
+license.workspace      = true
+rust-version.workspace = true
+repository.workspace   = true
+description = "matchx wire protocol — binary codec, no I/O."
+
+[lints]
+workspace = true

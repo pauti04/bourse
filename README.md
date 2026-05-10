@@ -1,11 +1,13 @@
 # matchx
 
-A high-performance, crash-safe limit order book matching engine in Rust.
+A limit order book matching engine in Rust. Single instrument,
+price-time priority, length-prefixed binary protocol over TCP, UDP
+multicast market data, write-ahead log with byte-exact replay.
 
-This repository is being built as a slice-based portfolio project. The
-workspace, CI, core type system, property tests, and documentation
-scaffolding are coming in via the bootstrap pull request.
+WIP. See `docs/log.md` for what's done and what's next.
 
-## License
+```bash
+cargo test --workspace
+```
 
-MIT — see [LICENSE](LICENSE).
+MIT.

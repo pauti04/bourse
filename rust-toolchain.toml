@@ -1,0 +1,6 @@
+[toolchain]
+# Pinned for reproducibility. Bump intentionally, with CI green on the new
+# version, in a dedicated commit.
+channel    = "1.95.0"
+components = ["rustfmt", "clippy"]
+profile    = "minimal"
