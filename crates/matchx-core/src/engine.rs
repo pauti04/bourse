@@ -41,6 +41,22 @@ pub struct Engine {
     handle: Option<JoinHandle<Matcher>>,
 }
 
+/// Stop handle returned alongside the producer/consumer halves by
+/// [`Engine::split`].
+pub struct EngineHandle {
+    stop_flag: Arc<AtomicBool>,
+    handle: JoinHandle<Matcher>,
+}
+
+impl EngineHandle {
+    /// Signal the matcher to stop, join the thread, return the final
+    /// [`Matcher`].
+    pub fn stop(self) -> Matcher {
+        self.stop_flag.store(true, Ordering::Release);
+        self.handle.join().expect("matcher thread panicked")
+    }
+}
+
 impl Engine {
     /// Spawn the matcher thread. `command_capacity` and `event_capacity`
     /// are minimums; both are rounded up to the next power of two.
@@ -73,6 +89,29 @@ impl Engine {
     /// if the event queue is empty.
     pub fn events(&mut self) -> &mut Consumer<Event> {
         &mut self.events
+    }
+
+    /// Move the producer and consumer halves out of the engine. The
+    /// returned [`EngineHandle`] keeps ownership of the matcher thread
+    /// and is responsible for stopping it. Useful when the producer
+    /// and consumer need to live in separate tasks (e.g. tokio reader
+    /// / writer halves of a TCP connection).
+    #[allow(
+        unsafe_code,
+        reason = "moving fields out of Self via ManuallyDrop+ptr::read; safe because we never touch `self` after"
+    )]
+    pub fn split(self) -> (Producer<Command>, Consumer<Event>, EngineHandle) {
+        let me = std::mem::ManuallyDrop::new(self);
+        // SAFETY: ManuallyDrop blocks the `Drop for Engine`. We `ptr::read`
+        // each field exactly once and never touch `me` again afterward,
+        // so there's no double-drop and no use-after-move.
+        unsafe {
+            let input = std::ptr::read(&me.input);
+            let events = std::ptr::read(&me.events);
+            let stop_flag = std::ptr::read(&me.stop_flag);
+            let handle = std::ptr::read(&me.handle).expect("engine handle was already taken");
+            (input, events, EngineHandle { stop_flag, handle })
+        }
     }
 
     /// Signal the matcher to stop, join the thread, and return the
