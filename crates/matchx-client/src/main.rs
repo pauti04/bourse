@@ -11,7 +11,10 @@
 //!    every server response.
 //!
 //! Usage:
-//!     matchx-client [<addr>] [<n_rtt>] [<n_throughput>]
+//!
+//! ```text
+//! matchx-client [addr] [n_rtt] [n_throughput]
+//! ```
 //!
 //! Defaults: `127.0.0.1:9000`, `10000` RTT iters, `100000` throughput
 //! orders.
