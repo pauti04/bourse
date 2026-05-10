@@ -112,6 +112,23 @@ impl Matcher {
         Self::default()
     }
 
+    /// Recovery constructor: a matcher seeded with a pre-built `Book`
+    /// and a sequence generator that starts at `next_seq`. Use this to
+    /// resume from a snapshot — pass the snapshot's seq marker so that
+    /// resting orders added during WAL-tail replay end up with the
+    /// same seq values they had on the live engine.
+    pub fn with_book(book: Book, next_seq: Sequence) -> Self {
+        Self {
+            book,
+            seq: SequenceGenerator::starting_at(next_seq),
+        }
+    }
+
+    /// What the next emitted sequence number will be.
+    pub fn peek_seq(&self) -> Sequence {
+        self.seq.peek()
+    }
+
     /// Borrow the underlying book (for inspection / tests).
     pub fn book(&self) -> &Book {
         &self.book

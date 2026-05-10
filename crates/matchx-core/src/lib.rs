@@ -4,6 +4,7 @@
 pub mod engine;
 pub mod matcher;
 pub mod order_book;
+pub mod snapshot;
 pub mod spsc;
 pub mod types;
 pub mod wal;
