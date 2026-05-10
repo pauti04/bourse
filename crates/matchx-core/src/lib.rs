@@ -2,6 +2,7 @@
 //! the rest of the workspace owns.
 
 pub mod engine;
+pub mod hub;
 pub mod matcher;
 pub mod order_book;
 pub mod snapshot;
