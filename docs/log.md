@@ -66,8 +66,20 @@ path.
 
 56 tests in matchx-core (4 new engine tests). All green.
 
-## slice 6 — next
-Wire protocol + `matchx-server` TCP gateway + `matchx-client` driver
-so the engine can be exercised over a socket. End-to-end with network
-adds parse + syscall to the round-trip; aim to measure p50/p99/p99.9
-under sustained mixed-order-flow load.
+## slice 6
+Wire protocol codec (`matchx-protocol`). Length-prefixed binary frames,
+1-byte version + 1-byte message type + fixed-size payload. Three
+message types: `NewOrder` and `Cancel` client→server, `Execution` (one
+per matcher `Event`) server→client. Hand-rolled — same reasoning as
+the WAL codec; small fixed schema, hot path, no dependency on a
+general-purpose serializer.
+
+5 tests including round-trip proptests for both client and server
+messages, plus targeted tests for unknown-version and truncated-body
+rejection.
+
+## slice 7 — next
+TCP server (`matchx-server`) + load-gen client (`matchx-client`) on
+top of the slice 6 codec, plus an integration test driving the engine
+over loopback TCP. End-to-end-with-network adds parse + syscall to the
+round-trip; aim is p50/p99/p99.9 histograms under sustained flow.
