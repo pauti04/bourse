@@ -48,27 +48,22 @@ impl Book {
         true
     }
 
-    /// Cancel by id. Returns `false` if the id isn't in the book — common
-    /// when a client cancels an order the matcher already filled.
-    pub fn cancel(&mut self, id: OrderId) -> bool {
-        let Some((side, price)) = self.index.remove(&id) else {
-            return false;
-        };
+    /// Cancel by id. Returns the resting quantity that was removed, or
+    /// `None` if the id isn't in the book — common when a client cancels
+    /// an order the matcher already filled.
+    pub fn cancel(&mut self, id: OrderId) -> Option<Qty> {
+        let (side, price) = self.index.remove(&id)?;
         let map = match side {
             Side::Buy => &mut self.bids,
             Side::Sell => &mut self.asks,
         };
-        let Some(level) = map.get_mut(&price) else {
-            return false;
-        };
-        let Some(pos) = level.iter().position(|o| o.id == id) else {
-            return false;
-        };
-        level.remove(pos);
+        let level = map.get_mut(&price)?;
+        let pos = level.iter().position(|o| o.id == id)?;
+        let qty = level.remove(pos)?.qty;
         if level.is_empty() {
             map.remove(&price);
         }
-        true
+        Some(qty)
     }
 
     /// Highest buy price, if any.
@@ -110,12 +105,68 @@ impl Book {
     pub fn is_empty(&self) -> bool {
         self.index.is_empty()
     }
+
+    /// True if `id` rests in the book.
+    pub fn contains(&self, id: OrderId) -> bool {
+        self.index.contains_key(&id)
+    }
+
+    /// Take up to `want` quantity from the front of the `(side, price)`
+    /// level. Returns `None` if no order rests there or `want` is zero.
+    /// The maker order is reduced in place; if exhausted it is removed
+    /// from the book and from the index. The matcher uses this to consume
+    /// liquidity.
+    pub fn take_front(&mut self, side: Side, price: Price, want: Qty) -> Option<Take> {
+        if want == Qty::ZERO {
+            return None;
+        }
+        let map = match side {
+            Side::Buy => &mut self.bids,
+            Side::Sell => &mut self.asks,
+        };
+        let level = map.get_mut(&price)?;
+        let front = level.front_mut()?;
+
+        let taken = if want.get() >= front.qty.get() {
+            front.qty
+        } else {
+            want
+        };
+        let maker = front.id;
+        let remaining = front.qty.saturating_sub(taken);
+
+        if remaining == Qty::ZERO {
+            level.pop_front();
+            self.index.remove(&maker);
+            if level.is_empty() {
+                map.remove(&price);
+            }
+        } else {
+            front.qty = remaining;
+        }
+
+        Some(Take {
+            maker,
+            taken,
+            remaining,
+        })
+    }
+}
+
+/// Result of [`Book::take_front`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Take {
+    /// The maker order whose front we consumed.
+    pub maker: OrderId,
+    /// Quantity actually taken (may be less than requested).
+    pub taken: Qty,
+    /// Quantity remaining on the maker after this take. Zero means the
+    /// maker was exhausted and removed from the book.
+    pub remaining: Qty,
 }
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::panic, reason = "tests assert via panic on setup")]
-
     use super::*;
 
     fn id(n: u64) -> OrderId {
@@ -180,7 +231,7 @@ mod tests {
     fn cancel_unknown_returns_false() {
         let mut b = Book::new();
         b.add(id(1), Side::Buy, p(100), q(1), s(1));
-        assert!(!b.cancel(id(999)));
+        assert!(b.cancel(id(999)).is_none());
         assert_eq!(b.len(), 1);
     }
 
@@ -189,7 +240,7 @@ mod tests {
         let mut b = Book::new();
         b.add(id(1), Side::Buy, p(100), q(1), s(1));
         b.add(id(2), Side::Buy, p(101), q(1), s(2));
-        assert!(b.cancel(id(2)));
+        assert_eq!(b.cancel(id(2)), Some(q(1)));
         assert_eq!(b.best_bid(), Some(p(100)));
         assert_eq!(b.level_len(Side::Buy, p(101)), 0);
     }

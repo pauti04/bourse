@@ -15,5 +15,9 @@ criterion.workspace = true
 name    = "order_book"
 harness = false
 
+[[bench]]
+name    = "matcher"
+harness = false
+
 [lints]
 workspace = true
