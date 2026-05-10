@@ -1,0 +1,49 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/matchx-core",
+    "crates/matchx-protocol",
+    "crates/matchx-server",
+    "crates/matchx-client",
+    "crates/matchx-replay",
+    "crates/matchx-bench",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+license = "MIT"
+rust-version = "1.95"
+repository = "https://github.com/pauti04/matchx"
+
+[workspace.dependencies]
+proptest = "1"
+
+[workspace.lints.rust]
+missing_docs           = "warn"
+unsafe_code            = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+unwrap_used   = "deny"
+expect_used   = "deny"
+panic         = "deny"
+print_stdout  = "deny"
+print_stderr  = "deny"
+dbg_macro     = "deny"
+todo          = "deny"
+unimplemented = "deny"
+unreachable   = "deny"
+
+[profile.release]
+codegen-units = 1
+lto           = "fat"
+panic         = "abort"
+opt-level     = 3
+debug         = "line-tables-only"
+
+[profile.bench]
+codegen-units = 1
+lto           = "fat"
+opt-level     = 3
+debug         = "line-tables-only"

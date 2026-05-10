@@ -1,0 +1,5 @@
+# Cargo config — kept minimal. We deliberately do NOT enable
+# `target-cpu=native` or other host-specific tuning here; that is a per-
+# deployment knob, not a default. See docs/architecture.md for the rationale.
+#
+# Add settings only when justified by a measured need.
