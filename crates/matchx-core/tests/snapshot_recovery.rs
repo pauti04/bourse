@@ -106,12 +106,12 @@ fn apply(
     for c in cmds {
         match *c {
             Cmd::New(no) => {
-                wal.append(&WalRecord::NewOrder(no)).unwrap();
+                let _ = wal.append(&WalRecord::NewOrder(no)).unwrap();
                 wal.commit().unwrap();
                 matcher.accept(no, events);
             }
             Cmd::Cancel(id) => {
-                wal.append(&WalRecord::Cancel(id)).unwrap();
+                let _ = wal.append(&WalRecord::Cancel(id)).unwrap();
                 wal.commit().unwrap();
                 matcher.cancel(id, events);
             }
@@ -135,13 +135,13 @@ fn snapshot_plus_wal_tail_reconstructs_live() {
     // Phase 1: first half of commands.
     apply(&mut live, first, &mut wal, &mut events);
 
-    // Snapshot at the midpoint. The marker is the matcher's next-seq
-    // at this moment — recovery uses it to seed a SequenceGenerator
-    // that picks up exactly where the live one left off, so resting
-    // orders added during tail replay end up with the same seq values
-    // they had on the live engine.
-    let snapshot_marker = live.peek_seq();
-    snapshot::write(live.book(), snapshot_marker, &snap_path).unwrap();
+    // Snapshot at the midpoint. The matcher marker is the matcher's
+    // next-seq, used to seed the recovered SequenceGenerator. The
+    // WAL marker is `next_seq() - 1`, the last record durably
+    // included — recovery skips records with `wal_seq <= wal_marker`.
+    let matcher_marker = live.peek_seq();
+    let wal_marker = matchx_core::types::Sequence::from_raw(wal.next_seq().get() - 1);
+    snapshot::write(live.book(), matcher_marker, wal_marker, &snap_path).unwrap();
 
     // Phase 2: second half. WAL keeps growing.
     apply(&mut live, second, &mut wal, &mut events);
@@ -151,15 +151,13 @@ fn snapshot_plus_wal_tail_reconstructs_live() {
     let recovery_start = Instant::now();
     let (recovered_book, marker_at_load) = snapshot::read(&snap_path).unwrap();
     let mut recovered = Matcher::with_book(recovered_book, marker_at_load);
-    // WAL records aren't seq-tagged in v1, so skip-by-count using the
-    // number of inputs we'd already applied at snapshot time. A real
-    // engine would tag each WAL record with its own seq and skip-by-seq.
-    let to_skip = first.len();
-    let mut skipped = 0usize;
+    // Skip-by-seq: each WAL record carries its `wal_seq`. Replay only
+    // those past the snapshot's wal-seq marker. No out-of-band counting
+    // — the snapshot file has the marker, the WAL has the seqs.
+    let snap_wal_seq = snapshot::read_wal_marker(&snap_path).unwrap();
     let mut replayed = 0usize;
-    for_each_record(&wal_path, |rec| {
-        if skipped < to_skip {
-            skipped += 1;
+    for_each_record(&wal_path, |seq, rec| {
+        if seq <= snap_wal_seq {
             return;
         }
         match rec {
@@ -183,7 +181,7 @@ fn snapshot_plus_wal_tail_reconstructs_live() {
     let full_replay_start = Instant::now();
     let mut full = Matcher::new();
     let mut count = 0usize;
-    for_each_record(&wal_path, |rec| {
+    for_each_record(&wal_path, |_seq, rec| {
         match rec {
             WalRecord::NewOrder(no) => full.accept(no, &mut events),
             WalRecord::Cancel(id) => full.cancel(id, &mut events),
@@ -196,9 +194,9 @@ fn snapshot_plus_wal_tail_reconstructs_live() {
     assert_eq!(live.book(), full.book());
 
     println!(
-        "snapshot marker: {:?}, recovery from (snapshot + tail): \
-         {:?} ({} WAL records replayed); full WAL replay: {:?} \
-         ({} records)",
-        marker_at_load, recovery_time, replayed, full_replay_time, count
+        "snapshot markers: matcher={:?} wal={:?}; recovery from \
+         (snapshot + tail): {:?} ({} WAL records replayed); full WAL \
+         replay: {:?} ({} records)",
+        marker_at_load, snap_wal_seq, recovery_time, replayed, full_replay_time, count
     );
 }

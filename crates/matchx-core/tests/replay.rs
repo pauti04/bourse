@@ -120,7 +120,7 @@ fn replay_byte_equal_to_live_run() {
     // Replay: read WAL into a fresh matcher.
     let mut replayed = Matcher::new();
     let mut replayed_events: Vec<Event> = Vec::with_capacity(live_events.len());
-    for_each_record(&wal_path, |rec| match rec {
+    for_each_record(&wal_path, |_seq, rec| match rec {
         WalRecord::NewOrder(no) => replayed.accept(no, &mut replayed_events),
         WalRecord::Cancel(id) => replayed.cancel(id, &mut replayed_events),
     })

@@ -14,11 +14,15 @@ use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::path::Path;
 
 use crate::matcher::{NewOrder, OrderKind};
-use crate::types::{OrderId, Price, Qty, Side, Timestamp};
+use crate::types::{OrderId, Price, Qty, Sequence, Side, Timestamp};
 
 // "MXCW" as little-endian bytes — printable in `xxd` for sanity.
 const MAGIC: u32 = 0x5743_584D;
-const SEGMENT_VERSION: u8 = 1;
+/// Segment-header version. Bumped to 2 in slice 13 to indicate
+/// per-record `wal_seq` tagging — `WalReader::read_record` surfaces
+/// the seq alongside the record so recovery can skip-by-seq from a
+/// snapshot marker without out-of-band coordination.
+const SEGMENT_VERSION: u8 = 2;
 const RECORD_VERSION: u8 = 1;
 
 const REC_TYPE_NEW_ORDER: u8 = 1;
@@ -52,6 +56,10 @@ pub enum WalError {
     UnknownSide(u8),
     /// Record body claims to be larger than `u32::MAX`.
     RecordTooLarge,
+    /// Record body shorter than the schema requires (after CRC has
+    /// already validated). Indicates a v2 record missing its 8-byte
+    /// `wal_seq` prefix.
+    Truncated,
 }
 
 impl core::fmt::Display for WalError {
@@ -66,6 +74,7 @@ impl core::fmt::Display for WalError {
             Self::UnknownKindTag(t) => write!(f, "wal order kind tag {t} unknown"),
             Self::UnknownSide(s) => write!(f, "wal side byte {s} unknown"),
             Self::RecordTooLarge => f.write_str("wal record exceeds u32::MAX bytes"),
+            Self::Truncated => f.write_str("wal record body too short for v2 framing"),
         }
     }
 }
@@ -96,17 +105,24 @@ pub enum WalRecord {
 
 /// Append-only WAL writer.
 ///
+/// Each appended record is tagged with a monotonically-increasing
+/// `wal_seq` (an internal counter, distinct from the matcher's seq),
+/// so on replay the reader can hand back `(wal_seq, record)` and a
+/// snapshot's marker can be compared directly to skip records.
+///
 /// `append` queues bytes through a `BufWriter`; `commit` flushes and
 /// fsyncs. Call `commit` whenever you need durability — typically per
 /// acked op.
 #[derive(Debug)]
 pub struct WalWriter {
     file: BufWriter<File>,
+    next_seq: u64,
 }
 
 impl WalWriter {
-    /// Create a new segment at `path`. Fails if the file already exists.
-    /// Writes the segment header and fsyncs it before returning.
+    /// Create a new segment at `path`. Fails if the file already
+    /// exists. Writes the segment header and fsyncs it before
+    /// returning. The first appended record gets `wal_seq = 1`.
     pub fn create(path: &Path) -> Result<Self, WalError> {
         let file = OpenOptions::new().write(true).create_new(true).open(path)?;
         let mut w = BufWriter::new(file);
@@ -114,20 +130,27 @@ impl WalWriter {
         w.write_all(&[SEGMENT_VERSION, 0, 0, 0])?;
         w.flush()?;
         w.get_ref().sync_all()?;
-        Ok(Self { file: w })
+        Ok(Self {
+            file: w,
+            next_seq: 1,
+        })
     }
 
     /// Append a record. Bytes go into the OS page cache; not durable
-    /// until [`commit`](Self::commit).
-    pub fn append(&mut self, record: &WalRecord) -> Result<(), WalError> {
-        let mut payload = Vec::with_capacity(48);
+    /// until [`commit`](Self::commit). Returns the `wal_seq` assigned
+    /// to this record.
+    pub fn append(&mut self, record: &WalRecord) -> Result<Sequence, WalError> {
+        let seq = self.next_seq;
+        let mut payload = Vec::with_capacity(56);
+        payload.extend_from_slice(&seq.to_le_bytes());
         encode_record(record, &mut payload);
         let len = u32::try_from(payload.len()).map_err(|_| WalError::RecordTooLarge)?;
         let crc = crc32c::crc32c(&payload);
         self.file.write_all(&len.to_le_bytes())?;
         self.file.write_all(&crc.to_le_bytes())?;
         self.file.write_all(&payload)?;
-        Ok(())
+        self.next_seq += 1;
+        Ok(Sequence::from_raw(seq))
     }
 
     /// Flush the buffer to the OS and fsync the file.
@@ -135,6 +158,13 @@ impl WalWriter {
         self.file.flush()?;
         self.file.get_ref().sync_all()?;
         Ok(())
+    }
+
+    /// What `wal_seq` the *next* `append` will assign. Useful at
+    /// snapshot time: the snapshot marker is `next_seq() - 1`, the
+    /// last record durably included in the snapshot's logical state.
+    pub fn next_seq(&self) -> Sequence {
+        Sequence::from_raw(self.next_seq)
     }
 }
 
@@ -165,7 +195,8 @@ impl WalReader {
     /// Next record, or `Ok(None)` at clean EOF or when the trailing
     /// record was truncated (partial write from a crash). CRC failures
     /// in the middle of the file are surfaced as `Err(CrcMismatch)`.
-    pub fn read_record(&mut self) -> Result<Option<WalRecord>, WalError> {
+    /// Returns `(wal_seq, record)`.
+    pub fn read_record(&mut self) -> Result<Option<(Sequence, WalRecord)>, WalError> {
         let mut header = [0u8; 8];
         match self.file.read_exact(&mut header) {
             Ok(()) => {}
@@ -184,18 +215,25 @@ impl WalReader {
         if crc32c::crc32c(&payload) != crc {
             return Err(WalError::CrcMismatch);
         }
-        Ok(Some(decode_record(&payload)?))
+        if payload.len() < 8 {
+            return Err(WalError::Truncated);
+        }
+        let mut seq_buf = [0u8; 8];
+        seq_buf.copy_from_slice(&payload[..8]);
+        let seq = Sequence::from_raw(u64::from_le_bytes(seq_buf));
+        let rec = decode_record(&payload[8..])?;
+        Ok(Some((seq, rec)))
     }
 }
 
-/// Run `f` on every record in the WAL at `path`.
+/// Run `f` on every `(wal_seq, record)` in the WAL at `path`.
 pub fn for_each_record<F>(path: &Path, mut f: F) -> Result<(), WalError>
 where
-    F: FnMut(WalRecord),
+    F: FnMut(Sequence, WalRecord),
 {
     let mut r = WalReader::open(path)?;
-    while let Some(rec) = r.read_record()? {
-        f(rec);
+    while let Some((seq, rec)) = r.read_record()? {
+        f(seq, rec);
     }
     Ok(())
 }
@@ -382,13 +420,26 @@ mod tests {
         let path = dir.join("wal");
         let mut w = WalWriter::create(&path).unwrap();
         let rec = WalRecord::Cancel(OrderId::new(42));
-        w.append(&rec).unwrap();
+        let assigned = w.append(&rec).unwrap();
         w.commit().unwrap();
         drop(w);
+        assert_eq!(assigned, Sequence::from_raw(1));
 
         let mut r = WalReader::open(&path).unwrap();
-        assert_eq!(r.read_record().unwrap(), Some(rec));
+        assert_eq!(r.read_record().unwrap(), Some((Sequence::from_raw(1), rec)));
         assert_eq!(r.read_record().unwrap(), None);
+    }
+
+    #[test]
+    fn assigned_seqs_are_consecutive() {
+        let dir = temp_dir("assigned_seqs_are_consecutive");
+        let path = dir.join("wal");
+        let mut w = WalWriter::create(&path).unwrap();
+        for i in 1..=10 {
+            let s = w.append(&WalRecord::Cancel(OrderId::new(i))).unwrap();
+            assert_eq!(s, Sequence::from_raw(i));
+        }
+        assert_eq!(w.next_seq(), Sequence::from_raw(11));
     }
 
     #[test]
@@ -434,7 +485,7 @@ mod tests {
         // First record reads cleanly.
         assert_eq!(
             r.read_record().unwrap(),
-            Some(WalRecord::Cancel(OrderId::new(1)))
+            Some((Sequence::from_raw(1), WalRecord::Cancel(OrderId::new(1))))
         );
         // Second record's body is short → treat as clean EOF.
         assert_eq!(r.read_record().unwrap(), None);
