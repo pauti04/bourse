@@ -46,6 +46,17 @@ impl SequenceGenerator {
         }
     }
 
+    /// Generator that will issue `start` next. Used on recovery to
+    /// resume from a snapshot's seq marker.
+    #[inline]
+    pub const fn starting_at(start: Sequence) -> Self {
+        let raw = start.get();
+        let raw = if raw == 0 { 1 } else { raw };
+        Self {
+            next: AtomicU64::new(raw),
+        }
+    }
+
     /// Next sequence number.
     #[inline]
     pub fn next(&self) -> Sequence {

@@ -7,8 +7,38 @@ rust-version.workspace = true
 repository.workspace   = true
 description = "matchx matching engine library."
 
+[dependencies]
+crc32c.workspace          = true
+crossbeam-queue.workspace = true
+# tokio is here only for `sync::mpsc` — used to deliver per-tenant events
+# from the matcher thread to the gateway's writer task in the hub. The
+# matcher itself does no I/O. The workspace defines tokio with the
+# features needed by matchx-server; we just inherit.
+tokio.workspace = true
+
 [dev-dependencies]
-proptest.workspace = true
+proptest.workspace  = true
+criterion.workspace = true
+
+[[bench]]
+name    = "order_book"
+harness = false
+
+[[bench]]
+name    = "matcher"
+harness = false
+
+[[bench]]
+name    = "spsc"
+harness = false
+
+[[bench]]
+name    = "engine"
+harness = false
+
+[[bench]]
+name    = "wal_commit"
+harness = false
 
 [lints]
 workspace = true

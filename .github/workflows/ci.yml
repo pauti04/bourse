@@ -50,3 +50,78 @@ jobs:
         run: rustup show
       - uses: Swatinem/rust-cache@v2
       - run: cargo doc --workspace --no-deps
+
+  bench-compile:
+    name: cargo bench --no-run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned toolchain (from rust-toolchain.toml)
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo bench --workspace --no-run
+
+  bench-numbers:
+    name: bench numbers (Ubuntu, --quick)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned toolchain (from rust-toolchain.toml)
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: bench-numbers
+      - name: Run benches in quick mode and capture output
+        run: |
+          set -o pipefail
+          {
+            echo "# matchx bench numbers"
+            echo
+            echo "Captured on GitHub Actions \`ubuntu-latest\`. Runner CPU varies"
+            echo "between runs by 2-10×; treat absolute numbers as a sanity"
+            echo "check, not as production-tuned measurements. The relative"
+            echo "comparisons (per-batch vs per-record, depth-N vs depth-1)"
+            echo "are stable."
+            echo
+            echo "## Environment"
+            echo
+            echo '```'
+            uname -a
+            cat /proc/cpuinfo | grep "model name" | head -1
+            cat /proc/cpuinfo | grep "cpu MHz" | head -1
+            free -m | head -2
+            echo '```'
+            echo
+            for bench in order_book matcher spsc engine wal_commit; do
+              echo "## ${bench}"
+              echo
+              echo '```'
+              cargo bench -p matchx-core --bench "$bench" -- --quick 2>&1 \
+                | grep -E "(time:|^Benchmarking [A-Z])" \
+                | grep -v "Analyzing" || true
+              echo '```'
+              echo
+            done
+          } > bench_numbers.md
+      - name: Upload bench numbers
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-numbers
+          path: bench_numbers.md
+
+  miri:
+    name: miri (lock-free modules)
+    runs-on: ubuntu-latest
+    env:
+      MIRIFLAGS: -Zmiri-strict-provenance
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly + miri
+        run: |
+          rustup toolchain install nightly --component miri
+          rustup +nightly component add miri
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: miri
+      - name: Run miri on spsc
+        run: cargo +nightly miri test --package matchx-core --lib spsc
