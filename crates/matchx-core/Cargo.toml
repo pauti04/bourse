@@ -22,5 +22,9 @@ harness = false
 name    = "matcher"
 harness = false
 
+[[bench]]
+name    = "spsc"
+harness = false
+
 [lints]
 workspace = true
