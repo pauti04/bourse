@@ -8,19 +8,32 @@ WIP — see [`docs/log.md`](docs/log.md) for what's done and what's next.
 
 ## Numbers
 
-End-to-end round-trip latency on M-series silicon, single core, no
-allocation on the hot path:
+End-to-end **over loopback TCP** (M-series silicon, macOS, release
+build, single connection, single matcher thread):
 
 ```
-Market on empty book                         → ~225 ns
-Limit fully fills against 1 resting maker    → ~424 ns
-Limit walks 1000 price levels and fully fills → ~94 µs (≈10M trades/s)
+RTT (sequential, send→Done(Filled)) over 5000 iters
+  p50   ~45 µs
+  p90   ~64 µs
+  p99   ~109 µs
+  p99.9 ~150 µs
+
+throughput (pipelined burst, 50k orders)
+  ~118k orders/sec
+  ~59k round-trips/sec
 ```
 
-The path measured is gateway thread → SPSC queue → matcher thread →
-SPSC queue → consumer thread. Numbers are from `criterion --quick`;
-fuller histograms (p50/p99/p99.9 under sustained load) come with the
-TCP slice.
+In-process (no TCP) the matcher is much tighter — the lock-free
+pipeline alone runs ~225 ns per round trip:
+
+```
+SPSC → matcher → SPSC, Market on empty                      → ~225 ns
+SPSC → matcher → SPSC, Limit fully fills against 1 maker    → ~424 ns
+matcher only, Limit walks 1000 price levels and fully fills → ~94 µs (≈10M trades/s)
+```
+
+The TCP cost (≈45 µs) is dominated by the kernel network stack,
+not the matcher. A kernel-bypass NIC would shave most of it.
 
 ## What's built
 
@@ -32,8 +45,11 @@ TCP slice.
 | Write-ahead log (CRC32C-framed records, fsync-on-commit, **byte-exact replay** test on 10k random orders) | ✅ slice 3 |
 | Lock-free SPSC ring buffer (Acquire/Release with `// SAFETY:` proofs, **Miri-validated in CI**) | ✅ slice 4 |
 | End-to-end engine (matcher on a dedicated thread, SPSC queues at the boundaries) | ✅ slice 5 |
-| TCP gateway + binary wire protocol | next |
+| Hand-rolled binary wire protocol codec | ✅ slice 6 |
+| TCP server + tokio-based gateway (`matchx-server`) | ✅ slice 7 |
+| Load-gen client with RTT + throughput histogram (`matchx-client`) | ✅ slice 8 |
 | Snapshots + recovery time bench | planned |
+| Multi-tenant matching (MPSC at the gateway) | v2 |
 
 ## Architecture
 
@@ -75,6 +91,16 @@ To run the headline replay test by name:
 
 ```bash
 cargo test -p matchx-core --test replay
+```
+
+To run the end-to-end TCP demo:
+
+```bash
+# Terminal 1
+cargo run --release -p matchx-server -- 127.0.0.1:9000
+
+# Terminal 2: 5000 RTT samples + 50000-order throughput burst
+cargo run --release -p matchx-client -- 127.0.0.1:9000 5000 50000
 ```
 
 ## Documentation

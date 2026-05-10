@@ -402,6 +402,12 @@ version = "0.0.1"
 [[package]]
 name = "matchx-client"
 version = "0.0.1"
+dependencies = [
+ "matchx-core",
+ "matchx-protocol",
+ "matchx-server",
+ "tokio",
+]
 
 [[package]]
 name = "matchx-core"

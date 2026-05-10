@@ -5,11 +5,17 @@ edition.workspace      = true
 license.workspace      = true
 rust-version.workspace = true
 repository.workspace   = true
-description = "matchx test client."
+description = "matchx test client and load generator."
 
 [[bin]]
 name = "matchx-client"
 path = "src/main.rs"
+
+[dependencies]
+matchx-core     = { path = "../matchx-core" }
+matchx-protocol = { path = "../matchx-protocol" }
+matchx-server   = { path = "../matchx-server" }
+tokio.workspace = true
 
 [lints]
 workspace = true
