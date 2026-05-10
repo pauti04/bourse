@@ -116,6 +116,10 @@ cargo run --release -p matchx-client -- 127.0.0.1:9000 5000 50000
 - [Designing the matchx lock-free SPSC queue](docs/posts/lock-free-spsc.md) —
   cache padding, cached views, Acquire/Release ordering, and validating
   the whole thing with Miri in CI.
+- [Crash-safe matching: WAL and byte-exact replay](docs/posts/wal-and-byte-exact-replay.md) —
+  CRC32C-framed records, truncation tolerance, snapshots, and the
+  10k-order integration test that proves recovery is bit-equal to the
+  live engine.
 
 ## License
 
