@@ -5,17 +5,19 @@
 //! than replaying the entire WAL: the runtime is bounded by snapshot
 //! size (proportional to resting depth) plus a short tail.
 //!
-//! ## File format
+//! ## File format (version 2)
 //!
 //! ```text
 //! [magic u32 LE = "MXSN"] [version u8] [pad 3]
-//! [seq u64]                                           # marker — tip of the WAL captured
+//! [matcher_seq u64]    # what the matcher's SequenceGenerator should resume at
+//! [wal_seq u64]        # last `wal_seq` captured in this snapshot
 //! [n_orders u64]
 //!   [id u64] [side u8] [price i64] [qty u64] [order_seq u64]   * n_orders
 //! ```
 //!
 //! Versioned at the file level. The file is written atomically via a
-//! temp-then-rename so a crash mid-write doesn't leave a torn snapshot.
+//! temp-then-rename so a crash mid-write doesn't leave a torn
+//! snapshot.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, BufWriter, Read, Write};
@@ -25,7 +27,7 @@ use crate::order_book::{Book, RestingOrder};
 use crate::types::{OrderId, Price, Qty, Sequence, Side};
 
 const MAGIC: u32 = 0x4E53_584D; // "MXSN" interpreted as LE bytes
-const VERSION: u8 = 1;
+const VERSION: u8 = 2;
 
 const SIDE_BUY: u8 = 1;
 const SIDE_SELL: u8 = 2;
@@ -77,9 +79,16 @@ impl From<io::Error> for SnapshotError {
     }
 }
 
-/// Write `book` to `path` as a snapshot at sequence `seq`. Atomic:
-/// writes to `path.tmp`, fsyncs, then renames into place.
-pub fn write(book: &Book, seq: Sequence, path: &Path) -> Result<(), SnapshotError> {
+/// Write `book` to `path` as a snapshot capturing both the matcher's
+/// next sequence (`matcher_seq`) and the last WAL `wal_seq` durably
+/// included in this snapshot. Atomic: writes to `path.tmp`, fsyncs,
+/// then renames into place.
+pub fn write(
+    book: &Book,
+    matcher_seq: Sequence,
+    wal_seq: Sequence,
+    path: &Path,
+) -> Result<(), SnapshotError> {
     let tmp_path = with_extension_suffix(path, ".tmp");
 
     // Make sure no stale tmp from a prior crash is in the way.
@@ -93,7 +102,8 @@ pub fn write(book: &Book, seq: Sequence, path: &Path) -> Result<(), SnapshotErro
 
     w.write_all(&MAGIC.to_le_bytes())?;
     w.write_all(&[VERSION, 0, 0, 0])?;
-    w.write_all(&seq.get().to_le_bytes())?;
+    w.write_all(&matcher_seq.get().to_le_bytes())?;
+    w.write_all(&wal_seq.get().to_le_bytes())?;
 
     let resting: Vec<RestingOrder> = book.iter_resting().collect();
     let n = resting.len() as u64;
@@ -119,8 +129,38 @@ pub fn write(book: &Book, seq: Sequence, path: &Path) -> Result<(), SnapshotErro
 }
 
 /// Read a snapshot from `path` and return the reconstructed book plus
-/// the sequence marker.
+/// the matcher seq marker. Use [`read_wal_marker`] to get the WAL
+/// seq if you only need that.
 pub fn read(path: &Path) -> Result<(Book, Sequence), SnapshotError> {
+    let (book, matcher_seq, _wal_seq) = read_full(path)?;
+    Ok((book, matcher_seq))
+}
+
+/// Read just the WAL `wal_seq` marker from a snapshot without
+/// rebuilding the book. Useful when the caller already loaded the
+/// book separately and just needs to know where in the WAL to
+/// resume.
+pub fn read_wal_marker(path: &Path) -> Result<Sequence, SnapshotError> {
+    let file = File::open(path)?;
+    let mut r = BufReader::new(file);
+    let mut hdr = [0u8; 8];
+    r.read_exact(&mut hdr).map_err(io_to_err)?;
+    let magic = u32::from_le_bytes([hdr[0], hdr[1], hdr[2], hdr[3]]);
+    if magic != MAGIC {
+        return Err(SnapshotError::BadMagic);
+    }
+    let version = hdr[4];
+    if version != VERSION {
+        return Err(SnapshotError::UnknownVersion(version));
+    }
+    let mut buf = [0u8; 16];
+    r.read_exact(&mut buf).map_err(io_to_err)?;
+    let mut wal_buf = [0u8; 8];
+    wal_buf.copy_from_slice(&buf[8..16]);
+    Ok(Sequence::from_raw(u64::from_le_bytes(wal_buf)))
+}
+
+fn read_full(path: &Path) -> Result<(Book, Sequence, Sequence), SnapshotError> {
     let file = File::open(path)?;
     let mut r = BufReader::new(file);
 
@@ -135,9 +175,13 @@ pub fn read(path: &Path) -> Result<(Book, Sequence), SnapshotError> {
         return Err(SnapshotError::UnknownVersion(version));
     }
 
-    let mut seq_buf = [0u8; 8];
-    r.read_exact(&mut seq_buf).map_err(io_to_err)?;
-    let seq = Sequence::from_raw(u64::from_le_bytes(seq_buf));
+    let mut matcher_buf = [0u8; 8];
+    r.read_exact(&mut matcher_buf).map_err(io_to_err)?;
+    let matcher_seq = Sequence::from_raw(u64::from_le_bytes(matcher_buf));
+
+    let mut wal_buf = [0u8; 8];
+    r.read_exact(&mut wal_buf).map_err(io_to_err)?;
+    let wal_seq = Sequence::from_raw(u64::from_le_bytes(wal_buf));
 
     let mut n_buf = [0u8; 8];
     r.read_exact(&mut n_buf).map_err(io_to_err)?;
@@ -169,7 +213,7 @@ pub fn read(path: &Path) -> Result<(Book, Sequence), SnapshotError> {
         }
     }
 
-    Ok((book, seq))
+    Ok((book, matcher_seq, wal_seq))
 }
 
 fn io_to_err(e: io::Error) -> SnapshotError {
@@ -244,7 +288,7 @@ mod tests {
         let dir = temp_dir("round_trip_simple_book");
         let path = dir.join("snap");
         let book = populated_book();
-        write(&book, Sequence::from_raw(42), &path).unwrap();
+        write(&book, Sequence::from_raw(42), Sequence::from_raw(42), &path).unwrap();
         let (restored, seq) = read(&path).unwrap();
         assert_eq!(seq, Sequence::from_raw(42));
         assert_eq!(book, restored);
@@ -255,7 +299,7 @@ mod tests {
         let dir = temp_dir("round_trip_empty_book");
         let path = dir.join("snap");
         let book = Book::new();
-        write(&book, Sequence::from_raw(0), &path).unwrap();
+        write(&book, Sequence::from_raw(0), Sequence::from_raw(0), &path).unwrap();
         let (restored, seq) = read(&path).unwrap();
         assert_eq!(seq, Sequence::from_raw(0));
         assert_eq!(book, restored);
@@ -299,7 +343,7 @@ mod tests {
             Qty::new(1),
             Sequence::from_raw(30),
         );
-        write(&b, Sequence::from_raw(0), &path).unwrap();
+        write(&b, Sequence::from_raw(0), Sequence::from_raw(0), &path).unwrap();
         let (restored, _) = read(&path).unwrap();
         // Cancel from the front; ids should come out in insertion order.
         let mut bb = restored;
@@ -318,13 +362,13 @@ mod tests {
         let dir = temp_dir("atomic_write_no_stale_tmp");
         let path = dir.join("snap");
         let book = populated_book();
-        write(&book, Sequence::from_raw(7), &path).unwrap();
+        write(&book, Sequence::from_raw(7), Sequence::from_raw(7), &path).unwrap();
         // First write should not leave a .tmp file behind.
         let tmp = with_extension_suffix(&path, ".tmp");
         assert!(!tmp.exists());
 
         // Re-write over an existing snapshot — also must not leave tmp.
-        write(&book, Sequence::from_raw(8), &path).unwrap();
+        write(&book, Sequence::from_raw(8), Sequence::from_raw(8), &path).unwrap();
         assert!(!tmp.exists());
 
         let (_, seq) = read(&path).unwrap();
