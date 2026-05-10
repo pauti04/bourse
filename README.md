@@ -1,5 +1,10 @@
 # matchx
 
+[![CI](https://github.com/pauti04/matchx/actions/workflows/ci.yml/badge.svg)](https://github.com/pauti04/matchx/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/rust-1.95-orange.svg)](rust-toolchain.toml)
+[![Site](https://img.shields.io/badge/site-pauti04.github.io%2Fmatchx-brightgreen.svg)](https://pauti04.github.io/matchx/)
+
 A limit order book matching engine in Rust. Single-instrument,
 price-time priority, length-prefixed binary protocol over TCP,
 write-ahead log with byte-exact replay, and a lock-free SPSC queue
