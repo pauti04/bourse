@@ -1,86 +1,77 @@
-//! matchx server — accepts TCP connections and pipes orders through
-//! the engine, one engine per connection.
+//! matchx server — accepts TCP connections and pipes orders through a
+//! shared multi-tenant `Hub`.
 //!
-//! Per connection: a fresh [`Engine`], split into a producer/consumer
-//! pair plus a handle. Two tokio tasks — a reader that decodes
-//! [`ClientMessage`]s off the wire and pushes [`Command`]s onto the
-//! engine, and a writer that drains [`Event`]s off the engine and
-//! frames them out as [`ServerMessage`]s. When the client disconnects,
-//! the reader returns; the writer is aborted; the engine is stopped.
-//!
-//! v1 limitation: one connection at a time per server-bound engine.
-//! Multi-tenant matching needs MPSC at the gateway boundary, which is
-//! parked under v2.
+//! One `Hub` for the whole process: a single matcher thread fed by a
+//! lock-free MPSC (`crossbeam_queue::ArrayQueue`) shared by every
+//! connected client. Each TCP connection registers a tenant on the
+//! hub and gets back `(Submitter, EventReceiver)`. The reader task
+//! decodes `ClientMessage`s and calls `submitter.submit`; the writer
+//! task drains the event receiver and frames events out as
+//! `ServerMessage`s. When the reader returns (client disconnect /
+//! decode error) the writer is aborted and the submitter dropped,
+//! which sends a `Disconnect` to the matcher.
 
 #![allow(
     clippy::expect_used,
-    reason = "task spawn / join failures are unrecoverable; matches std::thread's contract"
+    reason = "task spawn / join failures are unrecoverable; matches std::thread"
 )]
 
 use std::io;
+use std::sync::Arc;
 
-use matchx_core::engine::{Command, Engine};
+use matchx_core::hub::{Command, Hub, Submitter};
 use matchx_core::matcher::Event;
-use matchx_core::spsc::{Consumer, Producer};
 use matchx_protocol::{ClientMessage, ServerMessage, decode_client, encode_server};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::mpsc::UnboundedReceiver;
 
 /// Server configuration.
 #[derive(Debug, Clone, Copy)]
 pub struct Config {
-    /// Capacity of the SPSC command queue (rounded up to power of two).
-    pub command_capacity: usize,
-    /// Capacity of the SPSC event queue (rounded up to power of two).
-    pub event_capacity: usize,
+    /// Capacity of the shared MPSC inbox (rounded up internally).
+    pub inbox_capacity: usize,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
-            command_capacity: 4096,
-            event_capacity: 4096,
+            inbox_capacity: 8192,
         }
     }
 }
 
-/// Bind to `addr` and start serving. Returns the listener (so callers
-/// can read `local_addr` for tests using port 0) plus a future that
-/// runs the accept loop.
+/// Bind to `addr`. Returns a listener; pass it to [`serve`].
 pub async fn bind(addr: &str) -> io::Result<TcpListener> {
     TcpListener::bind(addr).await
 }
 
-/// Run the accept loop on `listener` forever, spawning a connection
-/// handler per accepted socket. Returns only on accept-loop error.
+/// Run the accept loop on `listener` forever, sharing one matcher
+/// across every accepted connection.
 pub async fn serve(listener: TcpListener, cfg: Config) -> io::Result<()> {
+    let hub = Arc::new(Hub::start(cfg.inbox_capacity));
     loop {
         let (stream, _peer) = listener.accept().await?;
-        tokio::spawn(handle_connection(stream, cfg));
+        let hub = Arc::clone(&hub);
+        tokio::spawn(handle_connection(stream, hub));
     }
 }
 
-async fn handle_connection(stream: TcpStream, cfg: Config) {
+async fn handle_connection(stream: TcpStream, hub: Arc<Hub>) {
     let _ = stream.set_nodelay(true);
-    let engine = Engine::start(cfg.command_capacity, cfg.event_capacity);
-    let (input, events, handle) = engine.split();
-
+    let (submitter, events) = hub.register();
     let (read_half, write_half) = stream.into_split();
-    let reader = tokio::spawn(reader_loop(read_half, input));
+
+    let reader = tokio::spawn(reader_loop(read_half, submitter));
     let writer = tokio::spawn(writer_loop(write_half, events));
 
-    // Wait for the reader to finish (client disconnected or sent garbage).
     let _ = reader.await;
-    // Tell the writer to stop draining and exit.
     writer.abort();
     let _ = writer.await;
-    let _ = handle.stop();
 }
 
-async fn reader_loop<R>(mut r: R, mut input: Producer<Command>) -> io::Result<()>
-where
-    R: AsyncReadExt + Unpin,
-{
+async fn reader_loop(mut r: OwnedReadHalf, submitter: Submitter) -> io::Result<()> {
     let mut len_buf = [0u8; 4];
     let mut body = Vec::with_capacity(64);
     loop {
@@ -103,31 +94,21 @@ where
                 ));
             }
         };
-        let mut c = cmd;
-        while let Err(returned) = input.try_push(c) {
-            c = returned;
-            tokio::task::yield_now().await;
-        }
+        submitter.submit(cmd);
     }
 }
 
-async fn writer_loop<W>(mut w: W, mut events: Consumer<Event>) -> io::Result<()>
-where
-    W: AsyncWriteExt + Unpin,
-{
+async fn writer_loop(
+    mut w: OwnedWriteHalf,
+    mut events: UnboundedReceiver<Event>,
+) -> io::Result<()> {
     let mut buf = Vec::with_capacity(64);
-    loop {
-        if let Some(e) = events.try_pop() {
-            buf.clear();
-            encode_server(&ServerMessage::Execution(e), &mut buf);
-            w.write_all(&buf).await?;
-            // Don't flush per event — TCP_NODELAY is on, so the kernel
-            // will send promptly, and skipping the explicit flush keeps
-            // small bursts coalesced.
-        } else {
-            tokio::task::yield_now().await;
-        }
+    while let Some(e) = events.recv().await {
+        buf.clear();
+        encode_server(&ServerMessage::Execution(e), &mut buf);
+        w.write_all(&buf).await?;
     }
+    Ok(())
 }
 
 /// For tests: read a single framed `ServerMessage` from `r`. Returns

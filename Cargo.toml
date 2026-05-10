@@ -17,10 +17,11 @@ rust-version = "1.95"
 repository = "https://github.com/pauti04/matchx"
 
 [workspace.dependencies]
-proptest  = "1"
-criterion = "0.7"
-crc32c    = "0.6"
-tokio     = { version = "1", features = ["rt-multi-thread", "net", "io-util", "macros", "sync"] }
+proptest        = "1"
+criterion       = "0.7"
+crc32c          = "0.6"
+crossbeam-queue = "0.3"
+tokio           = { version = "1", features = ["rt-multi-thread", "net", "io-util", "macros", "sync"] }
 
 [workspace.lints.rust]
 missing_docs           = "warn"
