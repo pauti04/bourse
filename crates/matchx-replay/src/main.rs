@@ -11,6 +11,8 @@
 //!
 //! In snapshot+tail mode the snapshot's `wal_seq` marker selects
 //! which WAL records to replay (skip those with `wal_seq <= marker`).
+//!
+//! Logging via `tracing`. Set `RUST_LOG` to control verbosity.
 
 #![allow(
     clippy::print_stdout,
@@ -31,6 +33,7 @@ use matchx_core::order_book::Book;
 use matchx_core::snapshot;
 use matchx_core::types::Sequence;
 use matchx_core::wal::{WalRecord, for_each_record};
+use tracing_subscriber::EnvFilter;
 
 fn usage_and_exit() -> ! {
     eprintln!("usage:");
@@ -40,6 +43,13 @@ fn usage_and_exit() -> ! {
 }
 
 fn main() -> ExitCode {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+        )
+        .with_target(false)
+        .init();
+
     let mut args = std::env::args().skip(1);
     let mut snap: Option<PathBuf> = None;
     let mut wal: Option<PathBuf> = None;
@@ -63,17 +73,21 @@ fn main() -> ExitCode {
         Some(p) => {
             let (book, matcher_seq) = snapshot::read(&p).expect("read snapshot");
             let wal_marker = snapshot::read_wal_marker(&p).expect("read snapshot marker");
-            println!(
-                "loaded snapshot {p:?}: matcher_seq={:?} wal_seq_marker={:?} resting={} bids/asks={:?}/{:?}",
-                matcher_seq,
-                wal_marker,
-                book.len(),
-                book.best_bid(),
-                book.best_ask(),
+            tracing::info!(
+                path = %p.display(),
+                ?matcher_seq,
+                ?wal_marker,
+                resting = book.len(),
+                best_bid = ?book.best_bid(),
+                best_ask = ?book.best_ask(),
+                "snapshot loaded"
             );
             (Matcher::with_book(book, matcher_seq), wal_marker)
         }
-        None => (Matcher::new(), Sequence::ZERO),
+        None => {
+            tracing::info!("no snapshot — starting from empty matcher");
+            (Matcher::new(), Sequence::ZERO)
+        }
     };
 
     let mut events = Vec::with_capacity(16);
@@ -89,6 +103,9 @@ fn main() -> ExitCode {
             WalRecord::Cancel(id) => matcher.cancel(id, &mut events),
         }
         replayed += 1;
+        if replayed.is_multiple_of(50_000) {
+            tracing::info!(records_replayed = replayed, ?last_seq, "progress");
+        }
     })
     .expect("replay wal");
     let elapsed = start.elapsed();

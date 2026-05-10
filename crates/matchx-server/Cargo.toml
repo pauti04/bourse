@@ -16,9 +16,11 @@ name = "matchx-server"
 path = "src/main.rs"
 
 [dependencies]
-matchx-core     = { path = "../matchx-core" }
-matchx-protocol = { path = "../matchx-protocol" }
-tokio.workspace = true
+matchx-core              = { path = "../matchx-core" }
+matchx-protocol          = { path = "../matchx-protocol" }
+tokio.workspace          = true
+tracing.workspace        = true
+tracing-subscriber.workspace = true
 
 [dev-dependencies]
 
