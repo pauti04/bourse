@@ -1,64 +1,56 @@
 # matchx
 
-A limit order book matching engine in Rust. Single instrument,
-price-time priority, write-ahead log with byte-exact replay, lock-free
-single-producer single-consumer queues at the boundaries.
+A high-performance, crash-safe limit order book matching engine in Rust.
+Single-instrument, price-time priority, FIX-inspired binary protocol over
+TCP, write-ahead log with byte-exact replay, and a lock-free SPSC queue
+between the gateway and the matcher.
 
-WIP — see [`docs/log.md`](docs/log.md) for what's done and what's next.
+## Headline numbers
 
-## Numbers
-
-End-to-end **over loopback TCP** (M-series silicon, macOS, release
-build, single connection, single matcher thread):
-
-```
-RTT (sequential, send→Done(Filled)) over 5000 iters
-  p50   ~45 µs
-  p90   ~64 µs
-  p99   ~109 µs
-  p99.9 ~150 µs
-
-throughput (pipelined burst, 50k orders)
-  ~118k orders/sec
-  ~59k round-trips/sec
-```
-
-In-process (no TCP) the matcher is much tighter — the lock-free
-pipeline alone runs ~225 ns per round trip:
+End-to-end on M-series silicon, single matcher thread, single TCP
+connection, release build:
 
 ```
-SPSC → matcher → SPSC, Market on empty                      → ~225 ns
-SPSC → matcher → SPSC, Limit fully fills against 1 maker    → ~424 ns
-matcher only, Limit walks 1000 price levels and fully fills → ~94 µs (≈10M trades/s)
+in-process round-trip            ~225 ns
+TCP round-trip (loopback) p50    ~45 µs
+TCP round-trip (loopback) p99    ~109 µs
+TCP throughput (pipelined)       ~118 k orders/sec
+matcher walks 1000 levels        ~94 µs (≈10 M trades/sec)
+WAL group commit speedup         187× to 245×
 ```
 
-The TCP cost (≈45 µs) is dominated by the kernel network stack,
-not the matcher. A kernel-bypass NIC would shave most of it.
+## What this demonstrates
 
-## What's built
-
-| Subsystem | Status |
-| --- | --- |
-| Core types (`Price` fixed-point i64, `OrderId`, `Sequence`, `Side`, `Qty`, `Timestamp`) | ✅ slice 0 |
-| In-memory order book (`BTreeMap` per side, `HashMap` index for cancel) | ✅ slice 1 |
-| Matcher (Limit / Market / IOC; partial fills; lifecycle proptest) | ✅ slice 2 |
-| Write-ahead log (CRC32C-framed records, fsync-on-commit, **byte-exact replay** test on 10k random orders) | ✅ slice 3 |
-| Lock-free SPSC ring buffer (Acquire/Release with `// SAFETY:` proofs, **Miri-validated in CI**) | ✅ slice 4 |
-| End-to-end engine (matcher on a dedicated thread, SPSC queues at the boundaries) | ✅ slice 5 |
-| Hand-rolled binary wire protocol codec | ✅ slice 6 |
-| TCP server + tokio-based gateway (`matchx-server`) | ✅ slice 7 |
-| Load-gen client with RTT + throughput histogram (`matchx-client`) | ✅ slice 8 |
-| Lock-free SPSC write-up | ✅ slice 9 |
-| Snapshots + byte-exact recovery test | ✅ slice 10 |
-| Multi-tenant matching (MPSC at the gateway) | v2 |
+- **Lock-free SPSC ring buffer** (cache-padded head/tail, cached views,
+  Acquire/Release pair) **validated by Miri** in CI on every push.
+  See [`crates/matchx-core/src/spsc.rs`](crates/matchx-core/src/spsc.rs)
+  and the [write-up](docs/posts/lock-free-spsc.md).
+- **Hot-path zero-allocation, machine-verified.** A custom
+  global-allocator harness counts every `alloc`/`realloc` call. The
+  steady-state `Limit`-cross path measures **0 allocs per 1000 pairs**
+  on macOS and well under one alloc-per-call on Ubuntu CI. See
+  [`crates/matchx-core/tests/no_alloc.rs`](crates/matchx-core/tests/no_alloc.rs).
+- **Byte-exact WAL replay.** 10 000 random orders run through a live
+  matcher with `fsync` per command; a fresh matcher replays the WAL;
+  the live and replayed books *and* event streams are equal sequence
+  for sequence. See
+  [`crates/matchx-core/tests/replay.rs`](crates/matchx-core/tests/replay.rs)
+  and the [write-up](docs/posts/wal-and-byte-exact-replay.md).
+- **Snapshot recovery.** Mid-stream snapshot at sequence N; recovery
+  loads the snapshot, skips WAL records with `wal_seq <= N`, replays
+  the tail. Result is byte-equal to the live engine. See
+  [`crates/matchx-core/tests/snapshot_recovery.rs`](crates/matchx-core/tests/snapshot_recovery.rs).
+- **WAL group commit benchmark** demonstrating a measured 187–245×
+  throughput improvement vs `fsync`-per-record at batch=256, with
+  the ratio holding across both macOS and Linux (CI artifact).
 
 ## Architecture
 
 ```
-   gateway thread (tokio)            matcher thread (dedicated)
+   tokio gateway thread(s)            matcher thread (dedicated)
         │                                  ▲
-        │  Command::New{...}               │
-        │  Command::Cancel{id}             │  poll
+        │  Command::New{...}               │  poll
+        │  Command::Cancel{id}             │
         ▼                                  │
    ┌───────────┐                       ┌───────────┐
    │  SPSC in  │ ────────────────────▶ │  matcher  │
@@ -72,10 +64,27 @@ not the matcher. A kernel-bypass NIC would shave most of it.
                                        └───────────┘
 ```
 
-The matcher runs on a single dedicated thread — no contention to design
-around inside it. The lock-free primitives are the SPSC queues at the
-boundaries; that's where the `unsafe`, `// SAFETY:` proofs, and Miri
-validation live.
+The matcher itself runs on one dedicated thread — single-writer, no
+contention to design around. The lock-free primitives are the SPSC
+queues at the boundaries; that's where `unsafe`, the `// SAFETY:`
+proofs, and Miri validation live. The matching path uses fixed-point
+integer arithmetic only — no floats, no allocation in steady state.
+
+The WAL is the durability boundary: every state-changing op is fsynced
+before the corresponding `ExecutionReport` is sent to the client.
+Recovery loads the latest snapshot plus the WAL tail and reconstructs
+state byte-for-byte.
+
+## Layout
+
+| Crate              | Purpose                                                   |
+| ------------------ | --------------------------------------------------------- |
+| `matchx-core`      | Matching engine library. Types, order book, matcher, WAL, snapshot, lock-free SPSC. |
+| `matchx-protocol`  | FIX-inspired binary wire protocol codec.                  |
+| `matchx-server`    | tokio TCP gateway; one engine per connection (v1).        |
+| `matchx-client`    | Test client + load generator with RTT histogram.          |
+| `matchx-replay`    | Recovery binary: rebuild book from snapshot + WAL tail.   |
+| `matchx-bench`     | Cross-crate `criterion` benches.                          |
 
 ## Quickstart
 
@@ -83,18 +92,12 @@ validation live.
 # Pinned toolchain — rustup picks 1.95.0 from rust-toolchain.toml.
 rustup show
 
-cargo test --workspace                 # unit + property + integration
-cargo bench --workspace --no-run       # confirm benches build
-cargo bench -p matchx-core             # actually run them
+cargo test --workspace                   # unit + property + integration
+cargo bench --workspace --no-run         # confirm benches build
+cargo bench -p matchx-core               # actually run them
 ```
 
-To run the headline replay test by name:
-
-```bash
-cargo test -p matchx-core --test replay
-```
-
-To run the end-to-end TCP demo:
+End-to-end TCP demo:
 
 ```bash
 # Terminal 1
@@ -104,42 +107,53 @@ cargo run --release -p matchx-server -- 127.0.0.1:9000
 cargo run --release -p matchx-client -- 127.0.0.1:9000 5000 50000
 ```
 
-To rebuild book state from a WAL (with optional snapshot) and print
-a state hash:
+Recovery from a WAL (with optional snapshot) printing a state hash:
 
 ```bash
-# full WAL replay
 cargo run --release -p matchx-replay -- --wal path/to/wal
-
-# snapshot + WAL tail (skips records with wal_seq <= snapshot marker)
 cargo run --release -p matchx-replay -- --snapshot path/to/snap --wal path/to/wal
 ```
+
+## What to read first
+
+For a 5-minute interviewer skim:
+
+1. The [SPSC write-up](docs/posts/lock-free-spsc.md) — cache padding,
+   memory ordering, the `!Sync` trick, Miri validation.
+2. The [WAL + replay write-up](docs/posts/wal-and-byte-exact-replay.md)
+   — input log vs output log, CRC32C, truncation tolerance, why
+   "byte-exact" needs the matcher's seq generator re-seeded.
+3. The [matcher's lifecycle proptest][lifecycle] — a per-id state
+   machine that simultaneously verifies fill conservation, no
+   over-/under-fill, no `Trade` before `Accepted`, and correct
+   `leaves_qty` on cancel. Caught two real bugs while it was being
+   written; both fixed in the same PR.
+4. The [allocation-counting harness][alloc] — closes the charter
+   gap "no allocation on the hot path" with measurements rather
+   than argument.
+
+[lifecycle]: crates/matchx-core/src/matcher.rs
+[alloc]: crates/matchx-core/tests/no_alloc.rs
 
 ## Documentation
 
 - [Architecture](docs/architecture.md)
 - [Correctness guarantees](docs/correctness-guarantees.md)
-- [Development log](docs/log.md)
+- [Development log](docs/log.md) (slice-by-slice)
 - [v2 ideas (out of scope)](docs/v2-ideas.md)
 
-### Write-ups
+### Long-form write-ups
 
-- [Designing the matchx lock-free SPSC queue](docs/posts/lock-free-spsc.md) —
-  cache padding, cached views, Acquire/Release ordering, and validating
-  the whole thing with Miri in CI.
-- [Crash-safe matching: WAL and byte-exact replay](docs/posts/wal-and-byte-exact-replay.md) —
-  CRC32C-framed records, truncation tolerance, snapshots, and the
-  10k-order integration test that proves recovery is bit-equal to the
-  live engine.
+- [Designing the matchx lock-free SPSC queue](docs/posts/lock-free-spsc.md)
+- [Crash-safe matching: WAL and byte-exact replay](docs/posts/wal-and-byte-exact-replay.md)
 
-### CI bench numbers
+### CI
 
-The `bench numbers` CI job runs the criterion benches on
-`ubuntu-latest` and uploads `bench_numbers.md` as a downloadable
-artifact on every PR. GitHub runners are noisy (2-10× variance run
-to run) so absolute numbers are a sanity check; the relative
-comparisons (group commit vs fsync-per-record, depth-N vs depth-1)
-are stable.
+Every push runs: `cargo fmt --check`, `cargo clippy --all-targets -D
+warnings`, `cargo test --workspace`, `cargo doc --no-deps`,
+`cargo bench --no-run`, **Miri** on the lock-free modules, and a
+**bench numbers** job on `ubuntu-latest` that uploads
+`bench_numbers.md` as a downloadable artifact.
 
 ## License
 
