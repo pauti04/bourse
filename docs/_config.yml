@@ -1,0 +1,15 @@
+title: matchx
+description: A limit order book matching engine in Rust — lock-free SPSC, byte-exact WAL replay, machine-verified zero-alloc on the hot path.
+theme: jekyll-theme-cayman
+show_downloads: false
+
+# So intra-repo links like [code](crates/matchx-core/src/spsc.rs) keep
+# working from the rendered site by linking back to GitHub.
+url: https://pauti04.github.io
+baseurl: /matchx
+
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default
