@@ -78,8 +78,26 @@ general-purpose serializer.
 messages, plus targeted tests for unknown-version and truncated-body
 rejection.
 
-## slice 7 — next
-TCP server (`matchx-server`) + load-gen client (`matchx-client`) on
-top of the slice 6 codec, plus an integration test driving the engine
-over loopback TCP. End-to-end-with-network adds parse + syscall to the
-round-trip; aim is p50/p99/p99.9 histograms under sustained flow.
+## slice 7
+TCP server (`matchx-server`). Per connection: a fresh `Engine` split
+into a producer/consumer pair plus a stop handle (new
+`Engine::split` — `ManuallyDrop` + `ptr::read` to move fields out of
+`self` so each end can live in its own tokio task). Two tasks per
+connection: reader decodes `ClientMessage`s and pushes `Command`s onto
+the engine; writer drains `Event`s and frames them as
+`ServerMessage`s. `TCP_NODELAY` on. When the client disconnects, the
+reader returns, the writer is aborted, the engine is stopped.
+
+v1 limitation: one connection per engine. Multi-tenant matching needs
+MPSC at the gateway boundary — parked under v2.
+
+Integration tests (`tests/loopback.rs`): bind to ephemeral port,
+spawn `serve` in a tokio task, connect a client, exchange orders,
+verify the server's `ServerMessage` stream matches what the matcher
+should emit. Two tests — full cross of two opposite limits, market
+on empty book.
+
+## slice 8 — next
+Load-gen client (`matchx-client`) that drives sustained flow over
+TCP and reports p50/p99/p99.9 latency histograms. That gives us the
+end-to-end-over-network number for the README.
