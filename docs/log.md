@@ -8,11 +8,7 @@ placeholder tests for the invariants we'll prove later.
 ## slice 1
 Concrete `Book`: `BTreeMap<Price, VecDeque<Order>>` per side, `HashMap`
 index for cancel. `add` / `cancel` / `best_bid` / `best_ask` plus
-`level_qty` / `level_len`. `cancel` returns `Option<Qty>` so the matcher
-can carry the resting qty through to the cancel ack.
-
-Tests: 9 unit, 4 proptest. First criterion bench. Quick numbers on
-M-series silicon:
+`level_qty` / `level_len`.
 
 ```
 Book::add    depths  0/100/1k/10k → ~99 / 61 / 130 / 554 ns
@@ -27,14 +23,9 @@ the event buffer so the hot path doesn't allocate per call. Limit /
 Market / IOC, partial fills, walks multiple price levels. Duplicate-id
 rejection doubles as v1's STP.
 
-Events: `Accepted`, `Trade`, `Done` with reasons Filled / Cancelled /
-Expired (IOC) / NoLiquidity (Market) / Rejected.
-
-Added `Book::take_front` so the matcher consumes liquidity in one call.
-
 The lifecycle proptest (per-id state machine) caught two real bugs
-during writing — duplicate-id Done collisions and `Book::cancel`
-returning `bool` and so lying about `leaves_qty`. Both fixed.
+during writing — duplicate-id Done collisions and `Book::cancel` lying
+about `leaves_qty`. Both fixed.
 
 ```
 Matcher::accept (no cross)       depth 0/100/1k    → ~128/554/691 ns
@@ -44,33 +35,45 @@ Matcher::accept (walks N levels) N=1/10/100/1000   → ~143ns/496ns/7.9µs/94µs
 ≈10M trades/s ceiling on the crossing path with this structure.
 
 ## slice 3
-Write-ahead log. Append-only segments, length-prefixed and CRC32C-framed
-records, fsync-on-commit. Replay re-feeds the recorded inputs through a
-fresh `Matcher` and produces the same book and the same event stream
-**byte-for-byte**.
+WAL. Append-only segments, length-prefixed and CRC32C-framed records,
+fsync-on-commit. `WalReader` tolerates a truncated trailing record
+(crash mid-fsync) as clean EOF and surfaces CRC mismatch as a typed
+error. Versioned: 4-byte magic + 1-byte segment version at file start;
+every record carries its own version byte.
 
-The headline integration test (`tests/replay.rs`) generates 10k random
-orders, runs them through a live matcher while logging every input to a
-WAL with fsync per command, then opens a fresh matcher and replays the
-WAL. Asserts:
-- Live book == replayed book (`Book` derives `PartialEq`).
-- Live event stream == replayed event stream (sequence-by-sequence).
+Headline integration test (`tests/replay.rs`): 10k random orders run
+through a live matcher with WAL fsync per command; a fresh matcher
+replays the WAL; live and replayed books are byte-equal AND live and
+replayed event streams are sequence-by-sequence identical. ~5500 trades
+on the test workload.
 
-`Book::cancel` already returned the resting qty; that lets the cancel
-event carry correct `leaves_qty` through replay. CRC mismatch is
-surfaced as a typed error; truncated trailing records are tolerated as
-clean EOF (so a crash mid-fsync doesn't poison the segment). Bad magic
-and unknown versions are rejected.
+## slice 4
+Lock-free single-producer single-consumer ring buffer. Cache-padded
+head and tail (separate cache lines so producer and consumer atomics
+don't bounce). Each side caches the other's index and only re-reads
+from the atomic when the cache says full / empty — that keeps the
+remote cache line out of the hot path most of the time.
 
-Tests: 4 unit + 1 codec proptest + the 10k integration test. 46 tests
-in matchx-core total. Dep added: `crc32c = "0.6"` (hardware-accelerated
-CRC32C on x86-64 SSE 4.2 and ARMv8 — the standard choice over IEEE
-CRC32 for WALs).
+Standard Acquire/Release pair: producer writes the slot, then publishes
+tail with `Release`; consumer reads tail with `Acquire` (which
+establishes happens-before with the slot write) before reading the
+slot. Symmetric on head for the consumer publishing "this slot is now
+free". `unsafe` is gated by `#[allow(unsafe_code)]` at module level;
+each block carries a `// SAFETY:` comment naming the invariant it
+relies on.
 
-## slice 4 — next
-Snapshots. Periodic serialization of book state alongside a sequence
-marker, so recovery doesn't have to replay the entire WAL. Add a
-snapshotter thread design (matcher emits a marker; sidecar walks the
-WAL up to the marker and writes the snapshot file). Recovery tool
-(`matchx-replay` binary) wired up: load latest snapshot, replay WAL
-since.
+**Miri job in CI** (`cargo +nightly miri test --package matchx-core
+--lib spsc`) exercises the unsafe blocks, atomic ordering, and a
+threaded producer/consumer pair (smaller N under cfg(miri) so the run
+finishes in seconds rather than hours). Catches data races and
+provenance violations.
+
+7 unit tests including a 100k-element threaded test (with Miri-aware
+N). Bench: push+pop batch of 256 in steady state ≈ 5.3 ns per
+operation on M-series silicon.
+
+## slice 5 — next
+Wire the SPSC queue into the matcher: gateway stub pushes `NewOrder` /
+`Cancel` commands onto the queue; matcher polls in a tight loop on a
+dedicated thread, drains commands and emits events. End-to-end
+latency bench: command queued → corresponding event observable.

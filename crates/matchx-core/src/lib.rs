@@ -3,5 +3,6 @@
 
 pub mod matcher;
 pub mod order_book;
+pub mod spsc;
 pub mod types;
 pub mod wal;

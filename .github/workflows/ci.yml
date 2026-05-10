@@ -60,3 +60,20 @@ jobs:
         run: rustup show
       - uses: Swatinem/rust-cache@v2
       - run: cargo bench --workspace --no-run
+
+  miri:
+    name: miri (lock-free modules)
+    runs-on: ubuntu-latest
+    env:
+      MIRIFLAGS: -Zmiri-strict-provenance
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install nightly + miri
+        run: |
+          rustup toolchain install nightly --component miri
+          rustup +nightly component add miri
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: miri
+      - name: Run miri on spsc
+        run: cargo +nightly miri test --package matchx-core --lib spsc
