@@ -1,0 +1,24 @@
+$ matchx-server 127.0.0.1:9000 &
+INFO matchx-server listening addr=127.0.0.1:9000
+INFO hub started, accepting connections inbox_capacity=8192
+
+$ matchx-client 127.0.0.1:9000 2000 20000
+connecting to 127.0.0.1:9000 ...
+
+RTT (sequential):
+  samples:    2000
+  p50:        78542 ns
+  p90:        112125 ns
+  p99:        307334 ns
+  p99.9:      782500 ns
+  max:        1093959 ns
+
+throughput (pipelined burst):
+  orders submitted:   20000
+  Done(Filled) seen:  10000
+  wall time:          228.27ms
+  rate:               87616 orders/sec (43808 round-trips/sec)
+
+# Captured on macOS, Apple silicon, loopback TCP, multi-tenant Hub path.
+# RTT mode is sequential (one outstanding order at a time).
+# Throughput mode pipelines 20k orders into one write.

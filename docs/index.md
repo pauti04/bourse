@@ -29,28 +29,49 @@ SPSC push+pop                    ~5.3 ns
 
 ## Architecture
 
-```
-   tokio gateway thread(s)            matcher thread (dedicated)
-        │                                  ▲
-        │  Command::New{...}               │  poll
-        │  Command::Cancel{id}             │
-        ▼                                  │
-   ┌───────────┐                       ┌───────────┐
-   │  MPSC in  │ ────────────────────▶ │  matcher  │
-   └───────────┘                       └───────────┘
-                                            │
-                                            │  Event::Trade{...}
-                                            │  Event::Done{...}
-                                            ▼
-                                       ┌───────────┐
-                                       │ SPSC out  │ ──▶ per-tenant writers, WAL
-                                       └───────────┘
+```mermaid
+flowchart LR
+    subgraph gateways["tokio gateway tasks"]
+        c1[client A reader]
+        c2[client B reader]
+        c3[client N reader]
+    end
+    mpsc[("MPSC inbox<br/>crossbeam ArrayQueue")]
+    matcher{{"matcher thread<br/>single-writer<br/>0 alloc on hot path"}}
+    subgraph fanout["per-tenant SPSC outbound"]
+        e1[client A writer]
+        e2[client B writer]
+        e3[client N writer]
+    end
+    wal[(WAL<br/>CRC32C frames<br/>fsync-on-commit)]
+    snap[(snapshot<br/>marker + book)]
+    c1 & c2 & c3 -->|Command| mpsc
+    mpsc --> matcher
+    matcher -->|Event| e1
+    matcher --> e2
+    matcher --> e3
+    matcher -.->|append + fsync| wal
+    wal -.->|periodic| snap
 ```
 
 The matcher itself runs on one dedicated thread — single-writer,
 no contention to design around. The lock-free primitives are the
 queues at the boundaries; that's where `unsafe`, the `// SAFETY:`
 proofs, and Miri validation live.
+
+## Live demo (real captured run)
+
+```
+$ matchx-client 127.0.0.1:9000 2000 20000
+RTT (sequential):
+  samples: 2000
+  p50:     78542 ns
+  p90:     112125 ns
+  p99:     307334 ns
+  p99.9:   782500 ns
+throughput (pipelined burst, 20k orders):
+  87616 orders/sec, 43808 round-trips/sec
+```
 
 ## Write-ups
 

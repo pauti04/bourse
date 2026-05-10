@@ -32,9 +32,20 @@ impl Sequence {
 /// In matchx the only writer is the matcher thread, so the increment runs
 /// at `Relaxed` ordering. Downstream publication establishes the necessary
 /// happens-before relationship for observers.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct SequenceGenerator {
     next: AtomicU64,
+}
+
+impl Default for SequenceGenerator {
+    fn default() -> Self {
+        // The derived `Default` would seed at 0, but `Sequence::ZERO`
+        // is documented as a sentinel that is never issued by this
+        // generator. Hand-roll so the first `next()` returns 1
+        // regardless of whether callers use `new()` or `default()`
+        // (e.g. via `Matcher::new()` which calls `Matcher::default()`).
+        Self::new()
+    }
 }
 
 impl SequenceGenerator {

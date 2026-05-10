@@ -141,3 +141,36 @@ in the queue.
 - README gains build / license / Rust / site badges.
 - `CHANGELOG.md` (this file) maps every commit on `main` to its
   slice.
+
+### Slice 23 — `tracing` instrumentation (charter requirement)
+- `tracing` + `tracing-subscriber` wired into `matchx-server` and
+  `matchx-replay`. `RUST_LOG` controls verbosity. Hot path
+  untouched (no allocating macros on the matcher loop).
+
+### Slice 24 — Graceful shutdown for `matchx-server`
+- New `serve_until` accepts a shutdown future; `main.rs` listens
+  on SIGINT / SIGTERM. In-flight handlers drain up to
+  `Config::shutdown_grace` (5 s default) then abort.
+
+### Slice 25 — WAL segment rotation
+- `WalWriter::open_dir(dir, max_segment_bytes)` rolls
+  `seg-NNNNNNNN.wal` files at the configured size threshold.
+  `for_each_record_dir` for replay across all segments. `wal_seq`
+  keeps incrementing across rotations.
+
+### Post-v0.1.0 polish — Mermaid diagram, captured demo, runnable example, seq-fix
+- README + Pages landing get a Mermaid architecture diagram
+  (GitHub renders it natively).
+- README adds a "Live demo" section with real captured output from
+  `matchx-server` + `matchx-client`. Full capture at
+  `docs/demo-output.txt`.
+- `crates/matchx-core/examples/basic_match.rs` — runnable example
+  driving the `Matcher` API directly:
+  `cargo run --release -p matchx-core --example basic_match`.
+- **Bug fix surfaced by the example**: `Matcher::new()` was issuing
+  `Sequence(0)` as its first event because the derived
+  `SequenceGenerator::default()` seeded `next: 0`, but
+  `Sequence::ZERO` is documented as a sentinel that should never
+  be issued. Hand-rolled `impl Default for SequenceGenerator`
+  that calls `new()` (seeds at 1) — first event is now
+  `Sequence(1)` as documented.

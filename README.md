@@ -21,17 +21,54 @@ between the gateway and the matcher.
 
 ## Headline numbers
 
-End-to-end on M-series silicon, single matcher thread, single TCP
-connection, release build:
+End-to-end on M-series silicon, single matcher thread, multi-tenant
+Hub, release build:
 
 ```
 in-process round-trip            ~225 ns
-TCP round-trip (loopback) p50    ~45 µs
-TCP round-trip (loopback) p99    ~109 µs
-TCP throughput (pipelined)       ~118 k orders/sec
+TCP round-trip (loopback) p50    ~78 µs
+TCP round-trip (loopback) p99    ~307 µs
+TCP throughput (pipelined)       ~88 k orders/sec
 matcher walks 1000 levels        ~94 µs (≈10 M trades/sec)
 WAL group commit speedup         187× to 245×
 ```
+
+The TCP RTT shifted from earlier `~45 µs` to `~78 µs` when the server
+gained the multi-tenant Hub (slice 18) — the MPSC + per-tenant
+routing adds a small constant overhead vs the earlier per-connection
+SPSC. The trade-off: the v1 "one connection per matcher" limit is
+gone.
+
+## Live demo
+
+A real captured run from `cargo run --release -p matchx-client`
+against a local `matchx-server`:
+
+```
+$ matchx-server 127.0.0.1:9000 &
+INFO matchx-server listening addr=127.0.0.1:9000
+INFO hub started, accepting connections inbox_capacity=8192
+
+$ matchx-client 127.0.0.1:9000 2000 20000
+connecting to 127.0.0.1:9000 ...
+
+RTT (sequential):
+  samples:    2000
+  p50:        78542 ns
+  p90:        112125 ns
+  p99:        307334 ns
+  p99.9:      782500 ns
+  max:        1093959 ns
+
+throughput (pipelined burst):
+  orders submitted:   20000
+  Done(Filled) seen:  10000
+  wall time:          228.27ms
+  rate:               87616 orders/sec (43808 round-trips/sec)
+```
+
+[Full capture](docs/demo-output.txt). To re-run: see
+[Quickstart](#quickstart).
 
 ## What I learned while building this
 
@@ -88,29 +125,43 @@ WAL group commit speedup         187× to 245×
 
 ## Architecture
 
-```
-   tokio gateway thread(s)            matcher thread (dedicated)
-        │                                  ▲
-        │  Command::New{...}               │  poll
-        │  Command::Cancel{id}             │
-        ▼                                  │
-   ┌───────────┐                       ┌───────────┐
-   │  SPSC in  │ ────────────────────▶ │  matcher  │
-   └───────────┘                       └───────────┘
-                                            │
-                                            │  Event::Trade{...}
-                                            │  Event::Done{...}
-                                            ▼
-                                       ┌───────────┐
-                                       │ SPSC out  │ ──▶  publisher / WAL
-                                       └───────────┘
+```mermaid
+flowchart LR
+    subgraph gateways["tokio gateway tasks (per connection)"]
+        c1[client A reader]
+        c2[client B reader]
+        c3[client N reader]
+    end
+
+    mpsc[("MPSC inbox<br/>crossbeam ArrayQueue")]
+    matcher{{"matcher thread<br/>single-writer<br/>0 alloc on hot path"}}
+
+    subgraph fanout["per-tenant SPSC outbound"]
+        e1[client A writer]
+        e2[client B writer]
+        e3[client N writer]
+    end
+
+    wal[(WAL<br/>CRC32C frames<br/>fsync-on-commit)]
+    snap[(snapshot<br/>marker + book)]
+
+    c1 & c2 & c3 -->|"Command<br/>NewOrder, Cancel"| mpsc
+    mpsc --> matcher
+    matcher -->|"Event<br/>Accepted, Trade, Done"| e1
+    matcher --> e2
+    matcher --> e3
+    matcher -.->|append + fsync| wal
+    wal -.->|periodic| snap
 ```
 
 The matcher itself runs on one dedicated thread — single-writer, no
-contention to design around. The lock-free primitives are the SPSC
-queues at the boundaries; that's where `unsafe`, the `// SAFETY:`
-proofs, and Miri validation live. The matching path uses fixed-point
-integer arithmetic only — no floats, no allocation in steady state.
+contention to design around. The lock-free primitives are the queues
+at the boundaries: a multi-producer single-consumer queue at ingress
+(many gateways feeding one matcher) and per-tenant single-producer
+single-consumer queues at egress. The SPSC at egress is where
+`unsafe`, the `// SAFETY:` proofs, and Miri validation live. The
+matching path uses fixed-point integer arithmetic only — no floats,
+no allocation in steady state.
 
 The WAL is the durability boundary: every state-changing op is fsynced
 before the corresponding `ExecutionReport` is sent to the client.
