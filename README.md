@@ -122,6 +122,19 @@ throughput (pipelined burst):
 - **WAL group commit benchmark** demonstrating a measured 187–245×
   throughput improvement vs `fsync`-per-record at batch=256, with
   the ratio holding across both macOS and Linux (CI artifact).
+- **Order kinds beyond Limit/Market/IOC.** Post-only (rejects if
+  it would cross immediately) and fill-or-kill (atomic all-or-
+  nothing fill via a bounded pre-walk of the opposite side). Both
+  reject pre-acceptance — no partial state changes, no `Accepted`
+  on reject — and both flow through the WAL and wire protocol
+  additively. See
+  [`crates/bourse-core/src/matcher.rs`](crates/bourse-core/src/matcher.rs)
+  and `Book::fillable_qty_at` in
+  [`crates/bourse-core/src/order_book.rs`](crates/bourse-core/src/order_book.rs).
+- **HdrHistogram-backed RTT percentiles** in the load-gen client.
+  Replaces the prior sort-and-pick percentile estimate with a
+  3-sigfig auto-resizing `hdrhistogram::Histogram` so the p99.9
+  tail is honest at small sample counts.
 
 ## Architecture
 

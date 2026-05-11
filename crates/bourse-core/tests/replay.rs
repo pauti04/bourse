@@ -68,9 +68,11 @@ fn generate(seed: u64, n: usize) -> Vec<Cmd> {
             // Keep prices in a narrow band so orders actually cross.
             let price = Price::from_raw(rng.range(95, 106) as i64);
             let kind = match rng.next() % 100 {
-                0..=69 => OrderKind::Limit { price },
-                70..=84 => OrderKind::Market,
-                _ => OrderKind::Ioc { price },
+                0..=54 => OrderKind::Limit { price },
+                55..=69 => OrderKind::Market,
+                70..=84 => OrderKind::Ioc { price },
+                85..=92 => OrderKind::PostOnly { price },
+                _ => OrderKind::Fok { price },
             };
             cmds.push(Cmd::New(NewOrder {
                 id: OrderId::new(id),

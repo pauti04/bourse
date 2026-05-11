@@ -15,6 +15,7 @@ path = "src/main.rs"
 bourse-core     = { path = "../bourse-core" }
 bourse-protocol = { path = "../bourse-protocol" }
 bourse-server   = { path = "../bourse-server" }
+hdrhistogram    = { version = "7", default-features = false }
 tokio.workspace = true
 
 [lints]

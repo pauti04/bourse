@@ -149,13 +149,13 @@ throughput mode pipelines 20 k orders into one write.
 | --- | --- |
 | Core types (`Price` fixed-point i64, `OrderId`, `Sequence`, `Side`, `Qty`, `Timestamp`) | ✅ |
 | In-memory order book (`BTreeMap` per side, `HashMap` index for cancel) | ✅ |
-| Matcher (Limit / Market / IOC; partial fills; lifecycle proptest) | ✅ |
+| Matcher (Limit / Market / IOC / **PostOnly** / **FOK**; partial fills; lifecycle proptest covers every kind) | ✅ |
 | Write-ahead log (CRC32C, fsync-on-commit, **byte-exact replay** on 10 k random orders) | ✅ |
 | Lock-free SPSC ring buffer (Acquire/Release with `// SAFETY:` proofs, **Miri-validated in CI**) | ✅ |
 | End-to-end engine (matcher on a dedicated thread, lock-free queues at the boundaries) | ✅ |
 | Hand-rolled binary wire protocol codec | ✅ |
 | TCP server + multi-tenant `Hub` (one matcher across many connections) | ✅ |
-| Load-gen client with RTT + throughput histogram | ✅ |
+| Load-gen client with RTT (HdrHistogram, 3 sigfig, auto-resize) + throughput burst | ✅ |
 | Snapshots + byte-exact recovery test | ✅ |
 | `bourse-replay` recovery binary | ✅ |
 | Allocation-counting test harness — **machine-verifies zero alloc on hot path** | ✅ |

@@ -32,6 +32,7 @@ use bourse_core::matcher::{DoneReason, Event, NewOrder, OrderKind};
 use bourse_core::types::{OrderId, Price, Qty, Side, Timestamp};
 use bourse_protocol::{ClientMessage, ServerMessage, encode_client};
 use bourse_server::read_one_server_message;
+use hdrhistogram::Histogram;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
@@ -92,7 +93,7 @@ async fn rtt_bench(addr: &str, n: usize) -> std::io::Result<()> {
         latencies.push(lat);
     }
 
-    print_histogram("RTT (sequential)", &mut latencies);
+    print_histogram("RTT (sequential)", &latencies);
     Ok(())
 }
 
@@ -205,21 +206,24 @@ async fn throughput_bench(addr: &str, n: usize) -> std::io::Result<()> {
     Ok(())
 }
 
-fn print_histogram(label: &str, latencies: &mut [u64]) {
-    latencies.sort_unstable();
-    let n = latencies.len();
-    let p = |q: f64| -> u64 {
-        let idx = ((n as f64) * q) as usize;
-        latencies.get(idx.min(n - 1)).copied().unwrap_or(0)
-    };
+fn print_histogram(label: &str, latencies: &[u64]) {
+    // 3-sig-fig HdrHistogram. Auto-resizing on the high end so a single
+    // multi-millisecond outlier doesn't truncate the tail (the prior
+    // sort-and-pick percentile was exact but O(n log n); HdrHistogram
+    // is O(n) and exposes p99.9 / p99.99 honestly even when n is small).
+    let mut h: Histogram<u64> = Histogram::new(3).expect("hdrhistogram new(3)");
+    for &v in latencies {
+        // record() can only fail if `v` exceeds the histogram's high
+        // bound; new(3) is auto-resizing so the only practical failure
+        // is v == 0 on some builds. Floor to 1 ns; nothing in this
+        // benchmark legitimately registers as 0 ns end-to-end.
+        let _ = h.record(v.max(1));
+    }
     println!("{label}:");
-    println!("  samples:    {n}");
-    println!("  p50:        {} ns", p(0.50));
-    println!("  p90:        {} ns", p(0.90));
-    println!("  p99:        {} ns", p(0.99));
-    println!("  p99.9:      {} ns", p(0.999));
-    println!(
-        "  max:        {} ns",
-        latencies.last().copied().unwrap_or(0)
-    );
+    println!("  samples:    {}", h.len());
+    println!("  p50:        {} ns", h.value_at_quantile(0.50));
+    println!("  p90:        {} ns", h.value_at_quantile(0.90));
+    println!("  p99:        {} ns", h.value_at_quantile(0.99));
+    println!("  p99.9:      {} ns", h.value_at_quantile(0.999));
+    println!("  max:        {} ns", h.max());
 }

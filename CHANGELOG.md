@@ -184,3 +184,33 @@ in the queue.
 - Workspace lints, hot-path invariants, and on-disk WAL/snapshot
   formats are unchanged. `cargo test --workspace` and Miri stay
   green on the renamed tree.
+
+### Post-v0.1.0 — Post-only and fill-or-kill order kinds
+- New `OrderKind::PostOnly { price }`. Rejected outright if accepting
+  would cross immediately against the resting book — the maker
+  guarantee that "this order will never pay taker fees". No
+  `Accepted` is emitted on rejection; mirrors the duplicate-id /
+  zero-qty path.
+- New `OrderKind::Fok { price }` (fill-or-kill). The matcher
+  pre-walks the opposite side, summing resting qty at acceptable
+  prices, and rejects atomically if the cumulative liquidity is
+  short of the requested quantity. No partial fills, no resting
+  remainder. Pre-walk stops as soon as enough liquidity is found,
+  so the overhead vs a plain Limit on a marketable order is bounded
+  by the actual fill depth.
+- `Book::fillable_qty_at(side, limit_price, cap)` is the new bounded
+  pre-walk used by FOK; same allocation footprint as the existing
+  `take_front` path.
+- Wire protocol gets `KIND_POST_ONLY = 4` / `KIND_FOK = 5` (additive,
+  no protocol-version bump — old clients/servers reject the new
+  tags via `UnknownKindTag`). Same additive change in the WAL kind
+  byte. Round-trip proptests cover both new variants.
+- Lifecycle proptest in the matcher grows two new `Op` arms so the
+  per-id state machine exercises the new rejection paths.
+
+### Post-v0.1.0 — HdrHistogram percentiles in `bourse-client`
+- Swapped the load-gen client's hand-rolled sort-and-pick percentile
+  for an `hdrhistogram::Histogram` with 3-sigfig resolution and
+  auto-resize. Output format is unchanged (`p50 / p90 / p99 /
+  p99.9 / max`) so the captured demo stays valid; the change is in
+  measurement quality, not display.

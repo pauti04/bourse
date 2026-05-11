@@ -111,6 +111,48 @@ impl Book {
         self.index.contains_key(&id)
     }
 
+    /// Sum the resting quantity on `side` whose price is at or better
+    /// than `limit_price`, capped at `cap`. Stops as soon as the running
+    /// sum reaches `cap`, so the worst case scans only enough levels to
+    /// satisfy the FOK pre-check.
+    ///
+    /// "Better than" means: from the perspective of a taker that would
+    /// cross with this side. A taker buying with `limit_price = P` walks
+    /// asks ascending and accepts `ask <= P`. A taker selling with
+    /// `limit_price = P` walks bids descending and accepts `bid >= P`.
+    pub fn fillable_qty_at(&self, side: Side, limit_price: Price, cap: Qty) -> Qty {
+        let mut sum = Qty::ZERO;
+        match side {
+            Side::Sell => {
+                for (&ask_price, level) in self.asks.iter() {
+                    if ask_price > limit_price {
+                        break;
+                    }
+                    for o in level {
+                        sum = sum.saturating_add(o.qty);
+                        if sum >= cap {
+                            return sum;
+                        }
+                    }
+                }
+            }
+            Side::Buy => {
+                for (&bid_price, level) in self.bids.iter().rev() {
+                    if bid_price < limit_price {
+                        break;
+                    }
+                    for o in level {
+                        sum = sum.saturating_add(o.qty);
+                        if sum >= cap {
+                            return sum;
+                        }
+                    }
+                }
+            }
+        }
+        sum
+    }
+
     /// Iterate every resting order. Yields bids first (price-ascending,
     /// time-priority within a level), then asks (same), so reinsertion in
     /// the same order reconstructs the level structure exactly.

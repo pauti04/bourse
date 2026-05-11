@@ -40,6 +40,8 @@ const SIDE_SELL: u8 = 2;
 const KIND_LIMIT: u8 = 1;
 const KIND_MARKET: u8 = 2;
 const KIND_IOC: u8 = 3;
+const KIND_POST_ONLY: u8 = 4;
+const KIND_FOK: u8 = 5;
 
 const EXEC_ACCEPTED: u8 = 1;
 const EXEC_TRADE: u8 = 2;
@@ -201,6 +203,14 @@ fn encode_new_order(no: &NewOrder, out: &mut Vec<u8>) {
             out.push(KIND_IOC);
             out.extend_from_slice(&price.raw().to_le_bytes());
         }
+        OrderKind::PostOnly { price } => {
+            out.push(KIND_POST_ONLY);
+            out.extend_from_slice(&price.raw().to_le_bytes());
+        }
+        OrderKind::Fok { price } => {
+            out.push(KIND_FOK);
+            out.extend_from_slice(&price.raw().to_le_bytes());
+        }
     }
     out.extend_from_slice(&no.timestamp.nanos().to_le_bytes());
 }
@@ -219,6 +229,12 @@ fn decode_new_order(c: &mut Cursor<'_>) -> Result<NewOrder, ProtocolError> {
         },
         KIND_MARKET => OrderKind::Market,
         KIND_IOC => OrderKind::Ioc {
+            price: Price::from_raw(c.read_i64()?),
+        },
+        KIND_POST_ONLY => OrderKind::PostOnly {
+            price: Price::from_raw(c.read_i64()?),
+        },
+        KIND_FOK => OrderKind::Fok {
             price: Price::from_raw(c.read_i64()?),
         },
         other => return Err(ProtocolError::UnknownKindTag(other)),
@@ -363,6 +379,12 @@ mod tests {
             }),
             Just(OrderKind::Market),
             any::<i64>().prop_map(|p| OrderKind::Ioc {
+                price: Price::from_raw(p)
+            }),
+            any::<i64>().prop_map(|p| OrderKind::PostOnly {
+                price: Price::from_raw(p)
+            }),
+            any::<i64>().prop_map(|p| OrderKind::Fok {
                 price: Price::from_raw(p)
             }),
         ]

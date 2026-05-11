@@ -28,6 +28,23 @@ pub enum OrderKind {
         /// Price ceiling (buy) / floor (sell).
         price: Price,
     },
+    /// Post-only limit. If accepting this order would cross immediately
+    /// against the resting book, the order is rejected outright (no
+    /// fills, nothing rested). Real exchanges expose this so a maker
+    /// can guarantee maker-rebate-eligible behavior — taking liquidity
+    /// here would mean paying taker fees instead.
+    PostOnly {
+        /// Limit price.
+        price: Price,
+    },
+    /// Fill-or-kill. Either the full quantity fills at or better than
+    /// `price` in this single accept, or the entire order is rejected
+    /// with no fills. The pre-check is a bounded scan of the opposite
+    /// side that stops as soon as enough liquidity is found.
+    Fok {
+        /// Price ceiling (buy) / floor (sell).
+        price: Price,
+    },
 }
 
 /// New order presented to the matcher.
@@ -152,6 +169,42 @@ impl Matcher {
             return;
         }
 
+        // Kind-specific pre-acceptance gates. Both PostOnly and Fok are
+        // all-or-nothing-modal: they reject before any state changes if
+        // their precondition fails, mirroring the zero-qty/duplicate-id
+        // path above (no `Accepted` is emitted).
+        let opposite = order.side.opposite();
+        match order.kind {
+            OrderKind::PostOnly { price } => {
+                let would_cross = match opposite {
+                    Side::Sell => self.book.best_ask().is_some_and(|a| a <= price),
+                    Side::Buy => self.book.best_bid().is_some_and(|b| b >= price),
+                };
+                if would_cross {
+                    out.push(Event::Done {
+                        id: order.id,
+                        leaves_qty: order.qty,
+                        reason: DoneReason::Rejected,
+                        seq: self.seq.next(),
+                    });
+                    return;
+                }
+            }
+            OrderKind::Fok { price } => {
+                let available = self.book.fillable_qty_at(opposite, price, order.qty);
+                if available < order.qty {
+                    out.push(Event::Done {
+                        id: order.id,
+                        leaves_qty: order.qty,
+                        reason: DoneReason::Rejected,
+                        seq: self.seq.next(),
+                    });
+                    return;
+                }
+            }
+            _ => {}
+        }
+
         // Receive ack. This is also the seq used for time-priority if
         // the order ends up resting (Limit with leftover).
         let receive_seq = self.seq.next();
@@ -161,7 +214,6 @@ impl Matcher {
             seq: receive_seq,
         });
 
-        let opposite = order.side.opposite();
         let mut remaining = order.qty;
 
         while remaining > Qty::ZERO {
@@ -173,7 +225,10 @@ impl Matcher {
 
             let crosses = match order.kind {
                 OrderKind::Market => true,
-                OrderKind::Limit { price } | OrderKind::Ioc { price } => match order.side {
+                OrderKind::Limit { price }
+                | OrderKind::Ioc { price }
+                | OrderKind::PostOnly { price }
+                | OrderKind::Fok { price } => match order.side {
                     Side::Buy => price >= best_price,
                     Side::Sell => price <= best_price,
                 },
@@ -217,8 +272,12 @@ impl Matcher {
         }
 
         match order.kind {
-            OrderKind::Limit { price } => {
-                // Duplicate id was caught upfront; book.add cannot fail here.
+            OrderKind::Limit { price } | OrderKind::PostOnly { price } => {
+                // Duplicate id was caught upfront; book.add cannot fail
+                // here. PostOnly that survived the pre-check is, by
+                // construction, non-marketable — `remaining == qty` and
+                // matching consumed nothing — so the rest path is
+                // identical to a plain Limit.
                 let _ = self
                     .book
                     .add(order.id, order.side, price, remaining, receive_seq);
@@ -233,7 +292,11 @@ impl Matcher {
                     seq: self.seq.next(),
                 });
             }
-            OrderKind::Ioc { .. } => {
+            OrderKind::Ioc { .. } | OrderKind::Fok { .. } => {
+                // The Fok pre-check guarantees a full fill, so this arm
+                // is unreachable in practice for Fok. The defensive
+                // Expired here matches Ioc and keeps the event stream
+                // well-formed if the invariant ever broke.
                 out.push(Event::Done {
                     id: order.id,
                     leaves_qty: remaining,
@@ -504,6 +567,155 @@ mod tests {
         assert!(out.is_empty());
     }
 
+    fn post_only(id_: u64, side: Side, price: i64, qty: u64) -> NewOrder {
+        NewOrder {
+            id: id(id_),
+            side,
+            qty: q(qty),
+            kind: OrderKind::PostOnly { price: p(price) },
+            timestamp: Timestamp::EPOCH,
+        }
+    }
+    fn fok(id_: u64, side: Side, price: i64, qty: u64) -> NewOrder {
+        NewOrder {
+            id: id(id_),
+            side,
+            qty: q(qty),
+            kind: OrderKind::Fok { price: p(price) },
+            timestamp: Timestamp::EPOCH,
+        }
+    }
+
+    #[test]
+    fn post_only_rejected_on_immediate_cross() {
+        let mut m = Matcher::new();
+        let mut out = vec![];
+        m.accept(limit(1, Side::Sell, 100, 5), &mut out);
+        out.clear();
+
+        // Post-only buy at 100 against ask at 100 would cross → rejected
+        // outright. No Accepted, no Trade, book unchanged.
+        m.accept(post_only(2, Side::Buy, 100, 5), &mut out);
+        assert_eq!(out.len(), 1);
+        assert!(matches!(
+            out[0],
+            Event::Done { id: i, reason: DoneReason::Rejected, leaves_qty: lq, .. }
+                if i == id(2) && lq == q(5)
+        ));
+        assert_eq!(m.book().best_ask(), Some(p(100)));
+        assert_eq!(m.book().level_qty(Side::Sell, p(100)), q(5));
+    }
+
+    #[test]
+    fn post_only_rests_when_not_marketable() {
+        let mut m = Matcher::new();
+        let mut out = vec![];
+        m.accept(limit(1, Side::Sell, 101, 5), &mut out);
+        out.clear();
+
+        // Post-only buy at 100 against ask at 101 → does not cross, rests.
+        m.accept(post_only(2, Side::Buy, 100, 5), &mut out);
+        assert_eq!(out.len(), 1);
+        assert!(matches!(out[0], Event::Accepted { id: i, .. } if i == id(2)));
+        assert_eq!(m.book().best_bid(), Some(p(100)));
+        assert_eq!(m.book().level_qty(Side::Buy, p(100)), q(5));
+    }
+
+    #[test]
+    fn post_only_on_empty_book_rests() {
+        let mut m = Matcher::new();
+        let mut out = vec![];
+        m.accept(post_only(1, Side::Buy, 100, 5), &mut out);
+        assert_eq!(out.len(), 1);
+        assert!(matches!(out[0], Event::Accepted { .. }));
+        assert_eq!(m.book().best_bid(), Some(p(100)));
+    }
+
+    #[test]
+    fn fok_rejected_when_insufficient_liquidity() {
+        let mut m = Matcher::new();
+        let mut out = vec![];
+        // Only 3 @ 100 available; FOK buy wants 5.
+        m.accept(limit(1, Side::Sell, 100, 3), &mut out);
+        out.clear();
+
+        m.accept(fok(2, Side::Buy, 100, 5), &mut out);
+        assert_eq!(out.len(), 1);
+        assert!(matches!(
+            out[0],
+            Event::Done { id: i, reason: DoneReason::Rejected, leaves_qty: lq, .. }
+                if i == id(2) && lq == q(5)
+        ));
+        // Book unchanged — no partial fill.
+        assert_eq!(m.book().level_qty(Side::Sell, p(100)), q(3));
+    }
+
+    #[test]
+    fn fok_rejected_when_only_unacceptable_prices_have_liquidity() {
+        let mut m = Matcher::new();
+        let mut out = vec![];
+        // 5 @ 105 (above FOK ceiling of 100); not acceptable.
+        m.accept(limit(1, Side::Sell, 105, 5), &mut out);
+        out.clear();
+
+        m.accept(fok(2, Side::Buy, 100, 5), &mut out);
+        assert!(matches!(
+            out[0],
+            Event::Done {
+                reason: DoneReason::Rejected,
+                ..
+            }
+        ));
+        assert_eq!(m.book().level_qty(Side::Sell, p(105)), q(5));
+    }
+
+    #[test]
+    fn fok_fully_fills_when_liquidity_sufficient() {
+        let mut m = Matcher::new();
+        let mut out = vec![];
+        m.accept(limit(1, Side::Sell, 100, 5), &mut out);
+        out.clear();
+
+        m.accept(fok(2, Side::Buy, 100, 5), &mut out);
+        // Accepted, Trade, Done(maker filled), Done(taker filled)
+        assert_eq!(out.len(), 4);
+        assert!(matches!(out[0], Event::Accepted { id: i, .. } if i == id(2)));
+        assert!(matches!(
+            out[1],
+            Event::Trade { taker: t, maker: mk, qty: x, .. }
+                if t == id(2) && mk == id(1) && x == q(5)
+        ));
+        assert!(matches!(
+            out[3],
+            Event::Done { id: i, reason: DoneReason::Filled, .. } if i == id(2)
+        ));
+        assert!(m.book().is_empty());
+    }
+
+    #[test]
+    fn fok_walks_multiple_levels_within_limit() {
+        let mut m = Matcher::new();
+        let mut out = vec![];
+        m.accept(limit(1, Side::Sell, 100, 3), &mut out);
+        m.accept(limit(2, Side::Sell, 101, 4), &mut out);
+        m.accept(limit(3, Side::Sell, 102, 1), &mut out); // above FOK ceiling
+        out.clear();
+
+        // FOK buy 7 @ 101: needs 7 fillable at <=101. Have 3@100 + 4@101 = 7. OK.
+        m.accept(fok(4, Side::Buy, 101, 7), &mut out);
+        let trades: Vec<_> = out
+            .iter()
+            .filter_map(|e| match e {
+                Event::Trade { price, qty, .. } => Some((*price, *qty)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(trades, vec![(p(100), q(3)), (p(101), q(4))]);
+        // 1 @ 102 untouched (above the FOK ceiling).
+        assert_eq!(m.book().best_ask(), Some(p(102)));
+        assert_eq!(m.book().level_qty(Side::Sell, p(102)), q(1));
+    }
+
     /// Duplicate id is rejected upfront — that's v1's STP. A taker whose id
     /// matches a resting order produces a single Done(Rejected) and never
     /// trades; the resting order is untouched.
@@ -552,6 +764,18 @@ mod proptests {
             price: i64,
             qty: u64,
         },
+        PostOnly {
+            id: u64,
+            buy: bool,
+            price: i64,
+            qty: u64,
+        },
+        Fok {
+            id: u64,
+            buy: bool,
+            price: i64,
+            qty: u64,
+        },
         Cancel {
             id: u64,
         },
@@ -565,6 +789,10 @@ mod proptests {
                 .prop_map(|(id, buy, qty)| Op::Market { id, buy, qty }),
             2 => (1u64..200, any::<bool>(), 90i64..110, 1u64..20)
                 .prop_map(|(id, buy, price, qty)| Op::Ioc { id, buy, price, qty }),
+            2 => (1u64..200, any::<bool>(), 90i64..110, 1u64..20)
+                .prop_map(|(id, buy, price, qty)| Op::PostOnly { id, buy, price, qty }),
+            2 => (1u64..200, any::<bool>(), 90i64..110, 1u64..20)
+                .prop_map(|(id, buy, price, qty)| Op::Fok { id, buy, price, qty }),
             3 => (1u64..200).prop_map(|id| Op::Cancel { id }),
         ]
     }
@@ -616,6 +844,40 @@ mod proptests {
                         side: side(buy),
                         qty: Qty::new(qty),
                         kind: OrderKind::Ioc {
+                            price: Price::from_raw(price),
+                        },
+                        timestamp: Timestamp::EPOCH,
+                    },
+                    &mut out,
+                ),
+                Op::PostOnly {
+                    id,
+                    buy,
+                    price,
+                    qty,
+                } => m.accept(
+                    NewOrder {
+                        id: OrderId::new(id),
+                        side: side(buy),
+                        qty: Qty::new(qty),
+                        kind: OrderKind::PostOnly {
+                            price: Price::from_raw(price),
+                        },
+                        timestamp: Timestamp::EPOCH,
+                    },
+                    &mut out,
+                ),
+                Op::Fok {
+                    id,
+                    buy,
+                    price,
+                    qty,
+                } => m.accept(
+                    NewOrder {
+                        id: OrderId::new(id),
+                        side: side(buy),
+                        qty: Qty::new(qty),
+                        kind: OrderKind::Fok {
                             price: Price::from_raw(price),
                         },
                         timestamp: Timestamp::EPOCH,
