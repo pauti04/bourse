@@ -1,8 +1,8 @@
-$ matchx-server 127.0.0.1:9000 &
-INFO matchx-server listening addr=127.0.0.1:9000
+$ bourse-server 127.0.0.1:9000 &
+INFO bourse-server listening addr=127.0.0.1:9000
 INFO hub started, accepting connections inbox_capacity=8192
 
-$ matchx-client 127.0.0.1:9000 2000 20000
+$ bourse-client 127.0.0.1:9000 2000 20000
 connecting to 127.0.0.1:9000 ...
 
 RTT (sequential):

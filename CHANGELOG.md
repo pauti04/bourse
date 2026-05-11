@@ -13,7 +13,7 @@ in the queue.
   (`unsafe_code`, `missing_docs`, `unwrap_used`, `expect_used`,
   `panic`, `print_stdout/stderr`, `dbg_macro`, `todo`,
   `unimplemented`, `unreachable`).
-- `matchx-core::types`: `OrderId`, `Sequence` + `SequenceGenerator`,
+- `bourse-core::types`: `OrderId`, `Sequence` + `SequenceGenerator`,
   `Side`, `Price` (i64 fixed-point, 8 fractional digits), `Qty`,
   `Timestamp`. Property tests for `Price` arithmetic / ordering and
   `SequenceGenerator` strict monotonicity.
@@ -63,7 +63,7 @@ in the queue.
   integration tests.
 
 ### Slice 8 — Load-gen client + RTT histogram
-- `matchx-client` with two modes: sequential RTT (warmup + 10 k
+- `bourse-client` with two modes: sequential RTT (warmup + 10 k
   measurement) and pipelined throughput burst.
 - Numbers (M-series, loopback): RTT p50 ~45 µs, p99 ~109 µs;
   throughput ~118 k orders/sec.
@@ -105,9 +105,9 @@ in the queue.
 - New CI job uploads `bench_numbers.md` on every PR with criterion
   output from every bench, runner CPU info, and a noise caveat.
 
-### Slice 16 — `matchx-replay` binary
+### Slice 16 — `bourse-replay` binary
 - The placeholder stub from slice 0 is now a real recovery binary:
-  `matchx-replay --snapshot <p> --wal <p>` loads the snapshot,
+  `bourse-replay --snapshot <p> --wal <p>` loads the snapshot,
   skips WAL records by `wal_seq`, replays the rest, prints a state
   hash.
 
@@ -118,7 +118,7 @@ in the queue.
 
 ### Slice 18 — Multi-tenant gateway via lock-free MPSC
 - New `Hub` (`crossbeam_queue::ArrayQueue` MPSC) + per-tenant
-  outbound `tokio::sync::mpsc`. `matchx-server` switched to share
+  outbound `tokio::sync::mpsc`. `bourse-server` switched to share
   one matcher across many TCP connections. New `multi_tenant.rs`
   integration test with three concurrent clients. Removes the v1
   "one connection per matcher" limit.
@@ -134,7 +134,7 @@ in the queue.
 
 ### Slice 21 — GitHub Pages site
 - `docs/index.md` landing + `docs/_config.yml`. Site live at
-  <https://pauti04.github.io/matchx/>; the three write-ups render
+  <https://pauti04.github.io/bourse/>; the three write-ups render
   at `/posts/<slug>.html`.
 
 ### Slice 22 — CI badges + this CHANGELOG
@@ -143,11 +143,11 @@ in the queue.
   slice.
 
 ### Slice 23 — `tracing` instrumentation (charter requirement)
-- `tracing` + `tracing-subscriber` wired into `matchx-server` and
-  `matchx-replay`. `RUST_LOG` controls verbosity. Hot path
+- `tracing` + `tracing-subscriber` wired into `bourse-server` and
+  `bourse-replay`. `RUST_LOG` controls verbosity. Hot path
   untouched (no allocating macros on the matcher loop).
 
-### Slice 24 — Graceful shutdown for `matchx-server`
+### Slice 24 — Graceful shutdown for `bourse-server`
 - New `serve_until` accepts a shutdown future; `main.rs` listens
   on SIGINT / SIGTERM. In-flight handlers drain up to
   `Config::shutdown_grace` (5 s default) then abort.
@@ -162,11 +162,11 @@ in the queue.
 - README + Pages landing get a Mermaid architecture diagram
   (GitHub renders it natively).
 - README adds a "Live demo" section with real captured output from
-  `matchx-server` + `matchx-client`. Full capture at
+  `bourse-server` + `bourse-client`. Full capture at
   `docs/demo-output.txt`.
-- `crates/matchx-core/examples/basic_match.rs` — runnable example
+- `crates/bourse-core/examples/basic_match.rs` — runnable example
   driving the `Matcher` API directly:
-  `cargo run --release -p matchx-core --example basic_match`.
+  `cargo run --release -p bourse-core --example basic_match`.
 - **Bug fix surfaced by the example**: `Matcher::new()` was issuing
   `Sequence(0)` as its first event because the derived
   `SequenceGenerator::default()` seeded `next: 0`, but
@@ -174,3 +174,13 @@ in the queue.
   be issued. Hand-rolled `impl Default for SequenceGenerator`
   that calls `new()` (seeds at 1) — first event is now
   `Sequence(1)` as documented.
+
+### Post-v0.1.0 — Renamed `matchx` → `bourse`
+- Project renamed. Every crate (`bourse-core`, `bourse-protocol`,
+  `bourse-server`, `bourse-client`, `bourse-replay`,
+  `bourse-bench`), the GitHub repo, and the Pages baseurl moved
+  over. "Bourse" is the European-finance word for a stock
+  exchange — what this code actually is.
+- Workspace lints, hot-path invariants, and on-disk WAL/snapshot
+  formats are unchanged. `cargo test --workspace` and Miri stay
+  green on the renamed tree.

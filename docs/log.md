@@ -45,7 +45,7 @@ spsc push+pop steady state → ~5.3 ns per op
 
 ## slice 5
 End-to-end engine. Two SPSC queues (`Command` in, `Event` out), the
-matcher loop runs on a dedicated `matchx-matcher` OS thread spawned by
+matcher loop runs on a dedicated `bourse-matcher` OS thread spawned by
 `Engine::start`. Busy-spins when both queues are quiet (low-latency
 config; production would park). Shutdown via an `AtomicBool` checked
 after every empty input poll, with a final drain for anything that
@@ -64,10 +64,10 @@ That's pure pipeline overhead through one lock-free queue, the matcher,
 and another lock-free queue, single core, no allocation on the hot
 path.
 
-56 tests in matchx-core (4 new engine tests). All green.
+56 tests in bourse-core (4 new engine tests). All green.
 
 ## slice 6
-Wire protocol codec (`matchx-protocol`). Length-prefixed binary frames,
+Wire protocol codec (`bourse-protocol`). Length-prefixed binary frames,
 1-byte version + 1-byte message type + fixed-size payload. Three
 message types: `NewOrder` and `Cancel` client→server, `Execution` (one
 per matcher `Event`) server→client. Hand-rolled — same reasoning as
@@ -79,7 +79,7 @@ messages, plus targeted tests for unknown-version and truncated-body
 rejection.
 
 ## slice 7
-TCP server (`matchx-server`). Per connection: a fresh `Engine` split
+TCP server (`bourse-server`). Per connection: a fresh `Engine` split
 into a producer/consumer pair plus a stop handle (new
 `Engine::split` — `ManuallyDrop` + `ptr::read` to move fields out of
 `self` so each end can live in its own tokio task). Two tasks per
@@ -152,7 +152,7 @@ WAL records aren't seq-tagged in v1 — we skip-by-count. Tagging is on
 the v2 list and would let recovery skip-by-seq directly.
 
 5 snapshot unit tests + 1 integration test. 62 tests total in
-matchx-core.
+bourse-core.
 
 ## slice 11
 Second write-up — WAL + byte-exact replay design. Same shape as the

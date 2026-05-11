@@ -1,6 +1,6 @@
-# Designing the matchx lock-free SPSC queue
+# Designing the bourse lock-free SPSC queue
 
-The matcher in [matchx][matchx] runs on a single dedicated OS thread.
+The matcher in [bourse][bourse] runs on a single dedicated OS thread.
 Orders arrive from the gateway thread; events leave to the publisher
 thread. The matcher itself is single-writer — we don't need any locking
 *inside* it. The contention lives at the boundaries: gateway → matcher
@@ -13,7 +13,7 @@ the design we ended up with: a bounded ring buffer with cache-padded
 indices, "cached views" of the other side, an Acquire/Release pair for
 memory ordering, and Miri-checked tests in CI.
 
-The code is in [`crates/matchx-core/src/spsc.rs`][spsc]. It's about 200
+The code is in [`crates/bourse-core/src/spsc.rs`][spsc]. It's about 200
 lines including tests.
 
 ## The naïve version
@@ -204,7 +204,7 @@ miri:
     - uses: Swatinem/rust-cache@v2
       with:
         key: miri
-    - run: cargo +nightly miri test --package matchx-core --lib spsc
+    - run: cargo +nightly miri test --package bourse-core --lib spsc
 ```
 
 Miri is much slower than native execution — easily 100× — so the
@@ -245,7 +245,7 @@ own work, not the queue.
 
 ## What we didn't do
 
-- **Multi-producer.** The matchx gateway is currently single-connection
+- **Multi-producer.** The bourse gateway is currently single-connection
   per engine, so SPSC is enough. A real exchange wants MPSC at the
   ingress; that's parked under v2 and would replace this queue at the
   gateway boundary.
@@ -262,9 +262,9 @@ own work, not the queue.
   pass could reach for `get_unchecked` with a SAFETY proof. Not worth
   the unsafe noise until benchmarks show it matters.
 
-## Why this matters for matchx
+## Why this matters for bourse
 
-The whole reason matchx can quote a ~225 ns end-to-end round trip is
+The whole reason bourse can quote a ~225 ns end-to-end round trip is
 that nothing on the hot path takes a lock or allocates. The SPSC
 queues are how we hold that invariant at the inter-thread boundaries.
 Everything else — the matcher, the WAL, the protocol codec — gets to
@@ -275,5 +275,5 @@ If you want to read the code, it's [`spsc.rs`][spsc]. The module is
 short on purpose: most of the engineering is in the comments and
 SAFETY proofs, not the lines of code.
 
-[matchx]: https://github.com/pauti04/matchx
-[spsc]: https://github.com/pauti04/matchx/blob/main/crates/matchx-core/src/spsc.rs
+[bourse]: https://github.com/pauti04/bourse
+[spsc]: https://github.com/pauti04/bourse/blob/main/crates/bourse-core/src/spsc.rs

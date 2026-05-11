@@ -1,6 +1,6 @@
-# matchx numbers, and how they were measured
+# bourse numbers, and how they were measured
 
-The matchx README opens with a code block of round-trip latencies and
+The bourse README opens with a code block of round-trip latencies and
 throughput numbers. This post says what those numbers actually
 measure, what they don't, and where you should be skeptical.
 
@@ -26,7 +26,7 @@ running.
 | Number | Bench | Notes |
 | --- | --- | --- |
 | in-process round-trip | [`benches/engine.rs`][engine-bench] | gateway thread → SPSC → matcher thread → SPSC → consumer thread |
-| TCP RTT | [`crates/matchx-client/src/main.rs`][client] | RTT mode: rest a Sell, time send-Buy → `Done(Filled)`, no pipelining |
+| TCP RTT | [`crates/bourse-client/src/main.rs`][client] | RTT mode: rest a Sell, time send-Buy → `Done(Filled)`, no pipelining |
 | TCP throughput | same | throughput mode: encode `n` orders into one buffer, write once, drain all responses, wall-clock |
 | matcher walks N levels | [`benches/matcher.rs`][matcher-bench] | `accept(Limit, fully fills against N resting makers)` |
 | WAL group commit | [`benches/wal_commit.rs`][wal-bench] | fsync-per-record vs one-fsync-per-batch at N = 1, 8, 64, 256 |
@@ -176,7 +176,7 @@ batch size.
 
 ## What we don't claim
 
-A few things matchx's numbers explicitly do *not* claim:
+A few things bourse's numbers explicitly do *not* claim:
 
 - **Production-tuned latency tail.** No SCHED_FIFO, no isolated cores,
   no NUMA pinning, no huge pages, no kernel-bypass NIC. Default
@@ -207,8 +207,8 @@ holds across platforms. The absolute values move with hardware and
 that's the way it should be.
 
 [readme]: ../../README.md
-[engine-bench]: ../../crates/matchx-core/benches/engine.rs
-[matcher-bench]: ../../crates/matchx-core/benches/matcher.rs
-[spsc-bench]: ../../crates/matchx-core/benches/spsc.rs
-[wal-bench]: ../../crates/matchx-core/benches/wal_commit.rs
-[client]: ../../crates/matchx-client/src/main.rs
+[engine-bench]: ../../crates/bourse-core/benches/engine.rs
+[matcher-bench]: ../../crates/bourse-core/benches/matcher.rs
+[spsc-bench]: ../../crates/bourse-core/benches/spsc.rs
+[wal-bench]: ../../crates/bourse-core/benches/wal_commit.rs
+[client]: ../../crates/bourse-client/src/main.rs

@@ -1,11 +1,11 @@
 ---
-title: matchx
+title: bourse
 ---
 
-# matchx
+# bourse
 
 A limit order book matching engine in Rust.
-[Source on GitHub →](https://github.com/pauti04/matchx)
+[Source on GitHub →](https://github.com/pauti04/bourse)
 
 > A learning portfolio piece. Single-instrument, price-time priority,
 > length-prefixed binary protocol over TCP, write-ahead log with
@@ -62,7 +62,7 @@ proofs, and Miri validation live.
 ## Live demo (real captured run)
 
 ```
-$ matchx-client 127.0.0.1:9000 2000 20000
+$ bourse-client 127.0.0.1:9000 2000 20000
 RTT (sequential):
   samples: 2000
   p50:     78542 ns
@@ -78,14 +78,14 @@ throughput (pipelined burst, 20k orders):
 Three long-form posts on the design decisions, tied directly to the
 working code:
 
-- [**Designing the matchx lock-free SPSC queue**](posts/lock-free-spsc.html)
+- [**Designing the bourse lock-free SPSC queue**](posts/lock-free-spsc.html)
   — cache padding, cached views, Acquire/Release ordering, and
   validating the whole thing with Miri in CI.
 - [**Crash-safe matching: WAL and byte-exact replay**](posts/wal-and-byte-exact-replay.html)
   — CRC32C-framed records, truncation tolerance, snapshots, and the
   10 k-order integration test that proves recovery is bit-equal to
   the live engine.
-- [**matchx numbers, and how they were measured**](posts/numbers-and-methodology.html)
+- [**bourse numbers, and how they were measured**](posts/numbers-and-methodology.html)
   — what each headline number actually measures, where the bench
   code is, and what we don't claim.
 
@@ -103,7 +103,7 @@ working code:
 | TCP server + multi-tenant `Hub` (one matcher across many connections) | ✅ |
 | Load-gen client with RTT + throughput histogram | ✅ |
 | Snapshots + byte-exact recovery test | ✅ |
-| `matchx-replay` recovery binary | ✅ |
+| `bourse-replay` recovery binary | ✅ |
 | Allocation-counting test harness — **machine-verifies zero alloc on hot path** | ✅ |
 
 ## What I learned
@@ -138,4 +138,4 @@ warnings`, `cargo test --workspace`, `cargo doc --no-deps`,
 **bench numbers** job on `ubuntu-latest` that uploads
 `bench_numbers.md` as a downloadable artifact.
 
-[Open the repo on GitHub →](https://github.com/pauti04/matchx)
+[Open the repo on GitHub →](https://github.com/pauti04/bourse)

@@ -57,6 +57,59 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c4512299f36f043ab09a583e57bceb5a5aab7a73db1805848e8fef3c9e8c78b3"
 
 [[package]]
+name = "bourse-bench"
+version = "0.0.1"
+
+[[package]]
+name = "bourse-client"
+version = "0.0.1"
+dependencies = [
+ "bourse-core",
+ "bourse-protocol",
+ "bourse-server",
+ "tokio",
+]
+
+[[package]]
+name = "bourse-core"
+version = "0.0.1"
+dependencies = [
+ "crc32c",
+ "criterion",
+ "crossbeam-queue",
+ "proptest",
+ "tokio",
+]
+
+[[package]]
+name = "bourse-protocol"
+version = "0.0.1"
+dependencies = [
+ "bourse-core",
+ "proptest",
+]
+
+[[package]]
+name = "bourse-replay"
+version = "0.0.1"
+dependencies = [
+ "bourse-core",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "bourse-server"
+version = "0.0.1"
+dependencies = [
+ "bourse-core",
+ "bourse-protocol",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -417,59 +470,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d1525a2a28c7f4fa0fc98bb91ae755d1e2d1505079e05539e35bc876b5d65ae9"
 dependencies = [
  "regex-automata",
-]
-
-[[package]]
-name = "matchx-bench"
-version = "0.0.1"
-
-[[package]]
-name = "matchx-client"
-version = "0.0.1"
-dependencies = [
- "matchx-core",
- "matchx-protocol",
- "matchx-server",
- "tokio",
-]
-
-[[package]]
-name = "matchx-core"
-version = "0.0.1"
-dependencies = [
- "crc32c",
- "criterion",
- "crossbeam-queue",
- "proptest",
- "tokio",
-]
-
-[[package]]
-name = "matchx-protocol"
-version = "0.0.1"
-dependencies = [
- "matchx-core",
- "proptest",
-]
-
-[[package]]
-name = "matchx-replay"
-version = "0.0.1"
-dependencies = [
- "matchx-core",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "matchx-server"
-version = "0.0.1"
-dependencies = [
- "matchx-core",
- "matchx-protocol",
- "tokio",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]

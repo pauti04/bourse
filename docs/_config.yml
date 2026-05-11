@@ -1,12 +1,12 @@
-title: matchx
+title: bourse
 description: A limit order book matching engine in Rust — lock-free SPSC, byte-exact WAL replay, machine-verified zero-alloc on the hot path.
 theme: jekyll-theme-cayman
 show_downloads: false
 
-# So intra-repo links like [code](crates/matchx-core/src/spsc.rs) keep
+# So intra-repo links like [code](crates/bourse-core/src/spsc.rs) keep
 # working from the rendered site by linking back to GitHub.
 url: https://pauti04.github.io
-baseurl: /matchx
+baseurl: /bourse
 
 defaults:
   - scope:

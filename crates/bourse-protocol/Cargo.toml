@@ -1,0 +1,17 @@
+[package]
+name = "bourse-protocol"
+version.workspace      = true
+edition.workspace      = true
+license.workspace      = true
+rust-version.workspace = true
+repository.workspace   = true
+description = "bourse wire protocol — binary codec, no I/O."
+
+[dependencies]
+bourse-core = { path = "../bourse-core" }
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

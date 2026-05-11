@@ -1,0 +1,28 @@
+[package]
+name = "bourse-server"
+version.workspace      = true
+edition.workspace      = true
+license.workspace      = true
+rust-version.workspace = true
+repository.workspace   = true
+description = "bourse server."
+
+[lib]
+name = "bourse_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "bourse-server"
+path = "src/main.rs"
+
+[dependencies]
+bourse-core              = { path = "../bourse-core" }
+bourse-protocol          = { path = "../bourse-protocol" }
+tokio.workspace          = true
+tracing.workspace        = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+
+[lints]
+workspace = true

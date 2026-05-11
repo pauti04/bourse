@@ -75,7 +75,7 @@ jobs:
         run: |
           set -o pipefail
           {
-            echo "# matchx bench numbers"
+            echo "# bourse bench numbers"
             echo
             echo "Captured on GitHub Actions \`ubuntu-latest\`. Runner CPU varies"
             echo "between runs by 2-10×; treat absolute numbers as a sanity"
@@ -96,7 +96,7 @@ jobs:
               echo "## ${bench}"
               echo
               echo '```'
-              cargo bench -p matchx-core --bench "$bench" -- --quick 2>&1 \
+              cargo bench -p bourse-core --bench "$bench" -- --quick 2>&1 \
                 | grep -E "(time:|^Benchmarking [A-Z])" \
                 | grep -v "Analyzing" || true
               echo '```'
@@ -124,4 +124,4 @@ jobs:
         with:
           key: miri
       - name: Run miri on spsc
-        run: cargo +nightly miri test --package matchx-core --lib spsc
+        run: cargo +nightly miri test --package bourse-core --lib spsc

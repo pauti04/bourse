@@ -1,0 +1,21 @@
+[package]
+name = "bourse-client"
+version.workspace      = true
+edition.workspace      = true
+license.workspace      = true
+rust-version.workspace = true
+repository.workspace   = true
+description = "bourse test client and load generator."
+
+[[bin]]
+name = "bourse-client"
+path = "src/main.rs"
+
+[dependencies]
+bourse-core     = { path = "../bourse-core" }
+bourse-protocol = { path = "../bourse-protocol" }
+bourse-server   = { path = "../bourse-server" }
+tokio.workspace = true
+
+[lints]
+workspace = true

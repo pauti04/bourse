@@ -1,12 +1,12 @@
 [workspace]
 resolver = "3"
 members = [
-    "crates/matchx-core",
-    "crates/matchx-protocol",
-    "crates/matchx-server",
-    "crates/matchx-client",
-    "crates/matchx-replay",
-    "crates/matchx-bench",
+    "crates/bourse-core",
+    "crates/bourse-protocol",
+    "crates/bourse-server",
+    "crates/bourse-client",
+    "crates/bourse-replay",
+    "crates/bourse-bench",
 ]
 
 [workspace.package]
@@ -14,7 +14,7 @@ version = "0.0.1"
 edition = "2024"
 license = "MIT"
 rust-version = "1.95"
-repository = "https://github.com/pauti04/matchx"
+repository = "https://github.com/pauti04/bourse"
 
 [workspace.dependencies]
 proptest           = "1"

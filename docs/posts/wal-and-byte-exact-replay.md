@@ -1,6 +1,6 @@
-# Crash-safe matching: matchx's WAL and byte-exact replay
+# Crash-safe matching: bourse's WAL and byte-exact replay
 
-The matcher in [matchx][matchx] makes decisions that can't be unmade.
+The matcher in [bourse][bourse] makes decisions that can't be unmade.
 A trade is a trade — the maker and taker have agreed, the executions
 have been (or will be) reported, and the broader system has wired
 positions and balances on the assumption that what happened, happened.
@@ -13,13 +13,13 @@ same internal sequence numbers. Anything else and the next event
 emitted post-recovery would diverge from what observers think
 happened.
 
-This post walks through how matchx's WAL is built and why an
+This post walks through how bourse's WAL is built and why an
 integration test on 10,000 random orders asserts the live and
 replayed engine state are bit-equal — including with a snapshot
 taken halfway through.
 
-The code is in [`crates/matchx-core/src/wal.rs`][wal] and
-[`crates/matchx-core/src/snapshot.rs`][snapshot]. The headline tests
+The code is in [`crates/bourse-core/src/wal.rs`][wal] and
+[`crates/bourse-core/src/snapshot.rs`][snapshot]. The headline tests
 are [`tests/replay.rs`][replay-test] and
 [`tests/snapshot_recovery.rs`][snapshot-test].
 
@@ -42,7 +42,7 @@ For recovery, inputs are what you want, for two reasons:
    out of the same code that produced the original events — any bug
    would have produced the same outputs the first time.
 
-So matchx's WAL records exactly two things: `NewOrder(NewOrder)` and
+So bourse's WAL records exactly two things: `NewOrder(NewOrder)` and
 `Cancel(OrderId)`. They reuse the matcher's `NewOrder` type directly,
 so the wire model is the matcher's input model. No translation, no
 schema drift.
@@ -165,7 +165,7 @@ check.
 ## Snapshots — bounded recovery
 
 Replaying a 100 GB WAL is cheap per record but not constant time. To
-bound recovery latency, matchx writes periodic snapshots: serialised
+bound recovery latency, bourse writes periodic snapshots: serialised
 book state plus a sequence marker.
 
 The snapshot file format mirrors the WAL's choices: magic,
@@ -227,7 +227,7 @@ few ms.
 
 ## Why this matters
 
-The WAL is matchx's contract with the rest of the world. Every
+The WAL is bourse's contract with the rest of the world. Every
 acknowledgement the matcher sends to a client is preceded by an
 fsync of the corresponding `NewOrder` / `Cancel`. If the engine
 crashes after the ack but before the next event lands, recovery
@@ -239,8 +239,8 @@ happened.
 Byte-exact replay is what makes that statement provable, not just
 plausible.
 
-[matchx]: https://github.com/pauti04/matchx
-[wal]: https://github.com/pauti04/matchx/blob/main/crates/matchx-core/src/wal.rs
-[snapshot]: https://github.com/pauti04/matchx/blob/main/crates/matchx-core/src/snapshot.rs
-[replay-test]: https://github.com/pauti04/matchx/blob/main/crates/matchx-core/tests/replay.rs
-[snapshot-test]: https://github.com/pauti04/matchx/blob/main/crates/matchx-core/tests/snapshot_recovery.rs
+[bourse]: https://github.com/pauti04/bourse
+[wal]: https://github.com/pauti04/bourse/blob/main/crates/bourse-core/src/wal.rs
+[snapshot]: https://github.com/pauti04/bourse/blob/main/crates/bourse-core/src/snapshot.rs
+[replay-test]: https://github.com/pauti04/bourse/blob/main/crates/bourse-core/tests/replay.rs
+[snapshot-test]: https://github.com/pauti04/bourse/blob/main/crates/bourse-core/tests/snapshot_recovery.rs
