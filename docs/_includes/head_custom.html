@@ -1,0 +1,333 @@
+<meta name="theme-color" content="#0e1116">
+<meta name="description" content="bourse — a limit order book matching engine in Rust. Lock-free SPSC validated by Miri, byte-exact WAL replay, machine-verified zero-alloc on the matcher hot path.">
+<meta property="og:title" content="bourse">
+<meta property="og:description" content="A limit order book matching engine in Rust. Lock-free SPSC, byte-exact WAL replay, machine-verified zero-alloc on the hot path.">
+<meta property="og:url" content="https://pauti04.github.io/bourse/">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+
+<style>
+:root {
+  --bg: #fafaf8;
+  --fg: #15171a;
+  --muted: #5a6068;
+  --rule: #e2e2dc;
+  --hero-bg: #0e1116;
+  --hero-fg: #f4f3ee;
+  --accent: #c8a45e;
+  --accent-soft: rgba(200, 164, 94, 0.12);
+  --code-bg: #f3f2ec;
+  --link: #1f3a8a;
+}
+
+html, body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 16px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* HERO ----------------------------------------------------------- */
+.page-header {
+  background: var(--hero-bg);
+  background-image: none;
+  color: var(--hero-fg);
+  padding: 5rem 1.5rem 4rem;
+  border-bottom: 3px solid var(--accent);
+  text-align: left;
+  max-width: none;
+}
+.page-header > * {
+  max-width: 920px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.project-name {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-weight: 700;
+  font-size: 3.5rem;
+  letter-spacing: -0.02em;
+  margin: 0 auto 0.5rem;
+  color: var(--hero-fg);
+}
+.project-name::before {
+  content: "//";
+  color: var(--accent);
+  margin-right: 0.6rem;
+  opacity: 0.85;
+}
+.project-tagline {
+  font-weight: 400;
+  font-size: 1.15rem;
+  color: #c8cdd4;
+  margin: 0 auto 1.5rem;
+  max-width: 720px;
+}
+.page-header .btn {
+  display: inline-block;
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85rem;
+  font-weight: 500;
+  padding: 0.45rem 0.95rem;
+  border-radius: 3px;
+  margin: 0.25rem 0.5rem 0 0;
+  transition: background 120ms ease, color 120ms ease;
+}
+.page-header .btn:hover {
+  background: var(--accent);
+  color: var(--hero-bg);
+  text-decoration: none;
+}
+
+/* MAIN ----------------------------------------------------------- */
+.main-content {
+  max-width: 920px;
+  padding: 2.5rem 1.5rem 4rem;
+  color: var(--fg);
+  font-size: 16px;
+}
+.main-content h1,
+.main-content h2,
+.main-content h3 {
+  font-family: 'Inter', sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  border-bottom: none;
+  padding-bottom: 0;
+}
+.main-content h2 {
+  font-size: 1.55rem;
+  margin: 3rem 0 1rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--rule);
+}
+.main-content h3 {
+  font-size: 1.2rem;
+  margin: 2rem 0 0.6rem;
+}
+.main-content p { margin: 0 0 1rem; }
+.main-content a { color: var(--link); text-decoration: none; border-bottom: 1px solid rgba(31, 58, 138, 0.25); }
+.main-content a:hover { border-bottom-color: var(--link); }
+
+.main-content blockquote {
+  border-left: 3px solid var(--accent);
+  background: var(--accent-soft);
+  padding: 1rem 1.2rem;
+  color: var(--fg);
+  margin: 1.4rem 0;
+  border-radius: 0 4px 4px 0;
+}
+.main-content blockquote p { margin: 0; }
+.main-content blockquote strong { color: #5e4310; }
+
+.main-content code {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.88em;
+  background: var(--code-bg);
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+  color: var(--fg);
+}
+.main-content pre {
+  background: #0e1116;
+  color: #e6e6df;
+  padding: 1.1rem 1.3rem;
+  border-radius: 4px;
+  border: 1px solid #1f242a;
+  font-size: 0.85rem;
+  line-height: 1.55;
+  overflow-x: auto;
+}
+.main-content pre code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  font-size: inherit;
+}
+
+.main-content table {
+  display: table;
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.4rem 0;
+  font-size: 0.95rem;
+}
+.main-content th,
+.main-content td {
+  border: 1px solid var(--rule);
+  padding: 0.6rem 0.85rem;
+  text-align: left;
+  vertical-align: top;
+}
+.main-content th {
+  background: #f1efe7;
+  font-weight: 600;
+}
+.main-content tr:nth-child(2n) { background: transparent; }
+
+.main-content hr {
+  border: none;
+  border-top: 1px solid var(--rule);
+  margin: 2.5rem 0;
+}
+
+/* HERO BADGES ---------------------------------------------------- */
+.hero-badges {
+  margin: 0 0 1.2rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.hero-badges a { border-bottom: none; }
+.hero-badges img { display: block; }
+
+/* NUMBERS GRID --------------------------------------------------- */
+.numbers-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.6rem;
+  margin: 1.5rem 0 1.2rem;
+}
+.numbers-grid .num {
+  border-left: 3px solid var(--accent);
+  background: #fff;
+  padding: 0.8rem 1rem;
+  border-top: 1px solid var(--rule);
+  border-right: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+}
+.numbers-grid .value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 1.35rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+}
+.numbers-grid .label {
+  color: var(--muted);
+  font-size: 0.82rem;
+  margin-top: 0.2rem;
+  line-height: 1.35;
+}
+
+/* WRITE-UP CARDS ------------------------------------------------- */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.8rem;
+  margin: 1.2rem 0 1.5rem;
+}
+.cards .card {
+  display: block;
+  padding: 1rem 1.1rem;
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-top: 3px solid var(--accent);
+  border-radius: 3px;
+  color: var(--fg);
+  transition: transform 120ms ease, border-color 120ms ease;
+  border-bottom: 1px solid var(--rule);
+}
+.cards .card:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent);
+  text-decoration: none;
+}
+.cards .card-title {
+  font-weight: 600;
+  font-size: 1.02rem;
+  margin-bottom: 0.4rem;
+  color: var(--fg);
+}
+.cards .card-body {
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+.cards .card code {
+  font-size: 0.82em;
+  background: var(--code-bg);
+}
+
+/* MERMAID -------------------------------------------------------- */
+.mermaid {
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 1.5rem 1rem;
+  margin: 1.4rem 0;
+  text-align: center;
+  overflow-x: auto;
+}
+
+/* FOOTER --------------------------------------------------------- */
+.footer-cta {
+  text-align: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.95rem;
+  margin: 1.5rem 0 0;
+}
+.footer-cta a {
+  border: 1px solid var(--fg);
+  padding: 0.5rem 1.1rem;
+  border-radius: 3px;
+  display: inline-block;
+  border-bottom: 1px solid var(--fg);
+}
+.footer-cta a:hover {
+  background: var(--fg);
+  color: var(--bg);
+  border-bottom-color: var(--fg);
+}
+
+.site-footer { border-top: 1px solid var(--rule); padding-top: 1rem; margin-top: 2.5rem; color: var(--muted); font-size: 0.85rem; }
+.site-footer a { color: var(--muted); }
+
+/* RESPONSIVE ----------------------------------------------------- */
+@media (max-width: 720px) {
+  .project-name { font-size: 2.5rem; }
+  .page-header { padding: 3rem 1rem 2.5rem; }
+  .main-content { padding: 2rem 1rem 3rem; }
+  .numbers-grid { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 480px) {
+  .numbers-grid { grid-template-columns: 1fr; }
+  .project-name { font-size: 2rem; }
+}
+</style>
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+  document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('pre > code.language-mermaid').forEach((code) => {
+      const div = document.createElement('div');
+      div.className = 'mermaid';
+      div.textContent = code.textContent;
+      code.parentElement.replaceWith(div);
+    });
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: 'neutral',
+      themeVariables: {
+        fontFamily: "'JetBrains Mono', ui-monospace, monospace",
+        primaryColor: '#fff7e6',
+        primaryBorderColor: '#c8a45e',
+        primaryTextColor: '#15171a',
+        lineColor: '#5a6068',
+        secondaryColor: '#f3f2ec',
+        tertiaryColor: '#fafaf8',
+      },
+    });
+    mermaid.run();
+  });
+</script>
